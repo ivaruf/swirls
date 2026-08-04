@@ -1,4 +1,4 @@
-/* swirls/effects.js — five meditative canvas modes, contract v2.
+/* swirls/effects.js — seven meditative canvas modes, contract v2.
    The user CASTS living entities into the scene: cast(env, seed) births an
    autonomous creature at the touch point that flies along the seed velocity,
    decelerates, meanders, animates on its own and fades away.
@@ -59,6 +59,17 @@
       var toC = Math.atan2(h * 0.5 - k.y, w * 0.5 - k.x);
       k.h += Math.sin(toC - k.h) * Math.min(1, 4 * dt);
     }
+  }
+
+  // a petal: a short rotating glint whose length breathes as it tumbles
+  function drawPetal(ctx, x, y, ang, len, style) {
+    var ap = len * (0.4 + 0.6 * Math.abs(Math.cos(ang * 1.7)));
+    var ca = Math.cos(ang) * ap, sa = Math.sin(ang) * ap;
+    ctx.strokeStyle = style;
+    ctx.beginPath();
+    ctx.moveTo(x - ca, y - sa);
+    ctx.lineTo(x + ca, y + sa);
+    ctx.stroke();
   }
 
   // population cap: overflowing oldest are fast-faded, far-overflow dropped
@@ -612,11 +623,220 @@
     };
   }
 
+  /* ------------------------------------------------------------------
+     6. Verdant Surge — cast a force node: a green will that surges
+        where thrown, dragging a dense swarm of tiny particles around
+        and behind it like iron filings in a moving field; on death the
+        swarm is released and settles back to a faint drift
+  ------------------------------------------------------------------ */
+  function verdantSurge() {
+    var ents = [];
+    var pool = [];
+    var tier = new Uint8Array(0);
+    var first = true;
+    var R2 = 200 * 200; // force reach, squared
+    var tierCols = [
+      'rgba(85,160,85,0.05)',    // resting moss
+      'rgba(70,200,120,0.13)',   // stirred emerald
+      'rgba(110,225,140,0.25)',  // rushing emerald
+      'rgba(195,245,150,0.4)'    // pale lime highlights
+    ];
+
+    return {
+      id: 'verdant-surge',
+      name: 'Verdant Surge',
+      init: function (env) {
+        ents.length = 0;
+        first = true;
+        var n = countFor(env.width, env.height, 3000, 140, 700);
+        pool.length = 0;
+        for (var i = 0; i < n; i++) {
+          pool.push({ x: rand(0, env.width), y: rand(0, env.height), vx: 0, vy: 0 });
+        }
+        tier = new Uint8Array(n);
+      },
+      cast: function (env, seed) {
+        seed = seed || {};
+        var pw = seedPower(seed);
+        capPush(ents, {
+          kin: makeKin(seed, env, 0.35, 60, 520),
+          age: 0, al: 0,
+          life: rand(3.5, 5) + pw * 2.5,
+          pull: 24000 * (0.6 + pw * 0.8),
+          swirl: 15000 * (Math.random() < 0.5 ? 1 : -1),
+          ph: rand(0, TAU)
+        });
+      },
+      frame: function (env) {
+        var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = first ? 'rgb(5,12,7)' : 'rgba(5,12,7,0.12)';
+        ctx.fillRect(0, 0, w, h);
+        first = false;
+        ctx.globalCompositeOperation = 'lighter';
+
+        // advance force nodes
+        for (var i = ents.length - 1; i >= 0; i--) {
+          var e = ents[i];
+          e.age += dt;
+          if (e.age >= e.life) { ents.splice(i, 1); continue; }
+          stepKin(e.kin, dt, t, 0.5, 1.0, w, h);
+          e.al = lifeAlpha(e.age, e.life);
+        }
+
+        // the swarm: faint ambient drift plus pull-and-swirl from every
+        // living node (direction folded into dx/dy — no sqrt needed)
+        var damp = Math.max(0, 1 - 1.7 * dt);
+        var ne = ents.length;
+        for (i = 0; i < pool.length; i++) {
+          var q = pool[i];
+          var fa = field(q.x, q.y, t);
+          q.vx = q.vx * damp + Math.cos(fa) * 7 * dt;
+          q.vy = q.vy * damp + Math.sin(fa) * 7 * dt;
+          for (var j = 0; j < ne; j++) {
+            var n2 = ents[j];
+            var dx = n2.kin.x - q.x, dy = n2.kin.y - q.y;
+            var d2 = dx * dx + dy * dy;
+            if (d2 > R2) continue;
+            var s = n2.al * dt / (d2 + 1800);
+            q.vx += (dx * n2.pull - dy * n2.swirl) * s;
+            q.vy += (dy * n2.pull + dx * n2.swirl) * s;
+          }
+          q.x += q.vx * dt;
+          q.y += q.vy * dt;
+          if (q.x < 0) q.x += w; else if (q.x > w) q.x -= w;
+          if (q.y < 0) q.y += h; else if (q.y > h) q.y -= h;
+          var sp2 = q.vx * q.vx + q.vy * q.vy;
+          tier[i] = sp2 > 14400 ? 3 : sp2 > 3600 ? 2 : sp2 > 400 ? 1 : 0;
+        }
+
+        // draw as speed-tinted streaks, one batched stroke per tier
+        for (var tr = 0; tr < 4; tr++) {
+          ctx.strokeStyle = tierCols[tr];
+          ctx.lineWidth = tr === 3 ? 1.4 : 1.1;
+          ctx.beginPath();
+          for (i = 0; i < pool.length; i++) {
+            if (tier[i] !== tr) continue;
+            var q2 = pool[i];
+            ctx.moveTo(q2.x - q2.vx * 0.05 - 0.6, q2.y - q2.vy * 0.05);
+            ctx.lineTo(q2.x + 0.6, q2.y);
+          }
+          ctx.stroke();
+        }
+
+        // node cores: a quiet green pulse marking each force center
+        for (i = 0; i < ents.length; i++) {
+          var e3 = ents[i];
+          var pr = 1 + 0.2 * Math.sin(t * 5 + e3.ph);
+          ctx.fillStyle = 'rgba(140,230,150,' + 0.10 * e3.al + ')';
+          ctx.beginPath();
+          ctx.arc(e3.kin.x, e3.kin.y, 9 * pr, 0, TAU);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(210,250,180,' + 0.30 * e3.al + ')';
+          ctx.beginPath();
+          ctx.arc(e3.kin.x, e3.kin.y, 2.4 * pr, 0, TAU);
+          ctx.fill();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    };
+  }
+
+  /* ------------------------------------------------------------------
+     7. Petal Fall — cast a gust of pale-rose petals: they ride the
+        throw while the gust lives, then sway, tumble and sift downward,
+        glinting as they turn, until they settle into the dusk
+  ------------------------------------------------------------------ */
+  function petalFall() {
+    var ents = [];
+    var amb = [];
+    var first = true;
+    var cols = ['rgba(235,160,180,', 'rgba(250,205,215,', 'rgba(205,125,155,'];
+
+    return {
+      id: 'petal-fall',
+      name: 'Petal Fall',
+      init: function (env) {
+        ents.length = 0;
+        first = true;
+        amb.length = 0;
+        var n = countFor(env.width, env.height, 90000, 4, 12);
+        for (var i = 0; i < n; i++) {
+          amb.push({
+            x: rand(0, env.width), y: rand(0, env.height),
+            fall: rand(8, 18), sw: rand(0.4, 0.9), ph: rand(0, TAU),
+            ang: rand(0, TAU), spin: rand(-1.5, 1.5),
+            c: (Math.random() * cols.length) | 0
+          });
+        }
+      },
+      cast: function (env, seed) {
+        seed = seed || {};
+        var pw = seedPower(seed);
+        var kin = makeKin(seed, env, 0.3, 25, 450);
+        kin.cruise = rand(8, 18); // gusts die down almost to stillness
+        var np = 6 + Math.round(pw * 9);
+        var petals = [];
+        for (var i = 0; i < np; i++) {
+          petals.push({
+            ox: rand(-14, 14), oy: rand(-14, 14),
+            fall: rand(10, 26),
+            sw: rand(0.5, 1.2), swA: rand(6, 14),
+            ph: rand(0, TAU),
+            ang: rand(0, TAU), spin: rand(-2.5, 2.5),
+            len: rand(2.5, 4.5),
+            c: (Math.random() * cols.length) | 0
+          });
+        }
+        capPush(ents, { kin: kin, petals: petals, age: 0, life: rand(4.5, 6.5) + pw * 2.5 });
+      },
+      frame: function (env) {
+        var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = first ? 'rgb(16,9,13)' : 'rgba(16,9,13,0.09)';
+        ctx.fillRect(0, 0, w, h);
+        first = false;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.lineWidth = 1.8;
+        ctx.lineCap = 'round';
+
+        // ambient whisper: a few petals sift down forever
+        for (var i = 0; i < amb.length; i++) {
+          var m = amb[i];
+          m.y += m.fall * dt;
+          m.x += Math.sin(t * m.sw + m.ph) * 14 * dt;
+          m.ang += m.spin * dt;
+          if (m.y > h + 8) { m.y = -8; m.x = rand(0, w); }
+          drawPetal(ctx, m.x, m.y, m.ang, 3, cols[m.c] + '0.06)');
+        }
+
+        // cast gusts: petals ride the throw, then sink apart as it calms
+        for (i = ents.length - 1; i >= 0; i--) {
+          var e = ents[i];
+          e.age += dt;
+          if (e.age >= e.life) { ents.splice(i, 1); continue; }
+          stepKin(e.kin, dt, t, 0.55, 0.6, w, h);
+          var al = lifeAlpha(e.age, e.life);
+          var sink = 0.25 + 0.75 * Math.min(1, e.age / 2);
+          for (var j = 0; j < e.petals.length; j++) {
+            var q = e.petals[j];
+            var px = e.kin.x + q.ox + Math.sin(t * q.sw + q.ph) * q.swA;
+            var py = e.kin.y + q.oy + q.fall * e.age * sink;
+            drawPetal(ctx, px, py, q.ang + q.spin * e.age, q.len, cols[q.c] + 0.45 * al + ')');
+          }
+        }
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    };
+  }
+
   window.SwirlsEffects = [
     driftTide(),
     emberBreath(),
     auroraVeil(),
     stillOrbits(),
-    nightPond()
+    nightPond(),
+    verdantSurge(),
+    petalFall()
   ];
 })();
