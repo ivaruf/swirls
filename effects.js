@@ -83,6 +83,48 @@
     e.life = Math.min(e.life, e.age + 0.6);
   }
 
+  /* scenery: each species paints its backdrop ONCE at init into an
+     offscreen canvas (re-painted on resize, since init re-runs). Fully
+     clearing effects just draw it; trail-fading effects draw it at low
+     globalAlpha so motion fades toward the scenery instead of flat color.
+     Backgrounds are scenery, never subject: silhouettes a shade or two
+     from the base, soft gradients, large simple forms. */
+  function makeBackdrop(env, paint) {
+    if (typeof document === 'undefined') return null;
+    var c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(env.width));
+    c.height = Math.max(1, Math.round(env.height));
+    var g = c.getContext('2d');
+    if (!g) return null;
+    paint(g, c.width, c.height);
+    return c;
+  }
+  // draw the backdrop as this frame's base: opaque on the first frame,
+  // then at the effect's trail-fade rate (fade >= 1 clears fully)
+  function drawBackdrop(ctx, bg, w, h, fade, base) {
+    if (bg) {
+      ctx.globalAlpha = fade >= 1 ? 1 : fade;
+      ctx.drawImage(bg, 0, 0);
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.fillStyle = fade >= 1 ? base : 'rgba(' + base.slice(4, -1) + ',' + fade + ')';
+      ctx.fillRect(0, 0, w, h);
+    }
+  }
+  // a soft horizon silhouette: a low-order sine ridge filled to the bottom
+  function ridge(g, W, H, base, a1, k1, a2, k2, ph, col) {
+    g.fillStyle = col;
+    g.beginPath();
+    g.moveTo(0, H + 2);
+    for (var x = 0; x <= W + 1; x += Math.max(2, W / 32)) {
+      g.lineTo(x, H * base + Math.sin(x / W * k1 + ph) * H * a1 +
+                   Math.sin(x / W * k2 + ph * 2.7) * H * a2);
+    }
+    g.lineTo(W, H + 2);
+    g.closePath();
+    g.fill();
+  }
+
   // shared kinematics: born at the seed point, launched along the seed
   // velocity (mapped down to graceful in-world speed), decelerates toward a
   // slow cruise, wanders more as it calms, and turns back near the edges
@@ -142,6 +184,7 @@
     var motes = [];
     var first = true;
     var held = null;
+    var bg = null;
     var shades = ['rgba(64,190,180,', 'rgba(40,150,165,', 'rgba(130,225,205,'];
 
     function makeEnt(env, seed, pw) {
@@ -173,6 +216,28 @@
         for (var i = 0; i < n; i++) {
           motes.push({ x: rand(0, env.width), y: rand(0, env.height), sp: rand(5, 12) });
         }
+        bg = makeBackdrop(env, function (g, W, H) {
+          // the abyss: light far above, a dune on the seafloor
+          var sea = g.createLinearGradient(0, 0, 0, H);
+          sea.addColorStop(0, 'rgb(6,17,21)');
+          sea.addColorStop(0.55, 'rgb(4,11,14)');
+          sea.addColorStop(1, 'rgb(3,8,11)');
+          g.fillStyle = sea;
+          g.fillRect(0, 0, W, H);
+          // three slanting shafts of light from the surface
+          g.fillStyle = 'rgba(140,210,205,0.022)';
+          for (var i = 0; i < 3; i++) {
+            var x0 = W * (0.22 + 0.26 * i);
+            g.beginPath();
+            g.moveTo(x0, 0);
+            g.lineTo(x0 + W * 0.05, 0);
+            g.lineTo(x0 + W * 0.16, H * 0.75);
+            g.lineTo(x0 + W * 0.02, H * 0.75);
+            g.closePath();
+            g.fill();
+          }
+          ridge(g, W, H, 0.93, 0.02, 4.2, 0.012, 9.1, 1, 'rgb(3,7,9)');
+        });
       },
       cast: function (env, seed) {
         seed = seed || {};
@@ -194,8 +259,7 @@
       frame: function (env) {
         var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
         ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = first ? 'rgb(4,11,14)' : 'rgba(4,11,14,0.08)';
-        ctx.fillRect(0, 0, w, h);
+        drawBackdrop(ctx, bg, w, h, first ? 1 : 0.08, 'rgb(4,11,14)');
         first = false;
 
         ctx.globalCompositeOperation = 'lighter';
@@ -263,6 +327,7 @@
     var motes = [];
     var first = true;
     var held = null;
+    var bg = null;
 
     function makeEnt(env, seed, pw) {
       return {
@@ -290,6 +355,34 @@
         for (var i = 0; i < n; i++) {
           motes.push({ x: rand(0, env.width), y: rand(0, env.height), vy: rand(4, 10), ph: rand(0, TAU) });
         }
+        bg = makeBackdrop(env, function (g, W, H) {
+          g.fillStyle = 'rgb(13,7,5)';
+          g.fillRect(0, 0, W, H);
+          // a warm floor under everything
+          var fl = g.createLinearGradient(0, H * 0.7, 0, H);
+          fl.addColorStop(0, 'rgba(36,16,9,0)');
+          fl.addColorStop(1, 'rgba(36,16,9,0.55)');
+          g.fillStyle = fl;
+          g.fillRect(0, H * 0.7, W, H * 0.3);
+          // a hearth-stone arch, low and dark
+          g.fillStyle = 'rgb(9,5,4)';
+          g.beginPath();
+          g.moveTo(W * 0.24, H + 2);
+          g.lineTo(W * 0.24, H * 0.8);
+          g.quadraticCurveTo(W * 0.5, H * 0.68, W * 0.76, H * 0.8);
+          g.lineTo(W * 0.76, H + 2);
+          g.closePath();
+          g.fill();
+          // its opening, faintly lit from within
+          g.fillStyle = 'rgb(19,10,7)';
+          g.beginPath();
+          g.moveTo(W * 0.36, H + 2);
+          g.lineTo(W * 0.36, H * 0.87);
+          g.quadraticCurveTo(W * 0.5, H * 0.79, W * 0.64, H * 0.87);
+          g.lineTo(W * 0.64, H + 2);
+          g.closePath();
+          g.fill();
+        });
       },
       cast: function (env, seed) {
         seed = seed || {};
@@ -312,8 +405,7 @@
         var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
         var p = env.pointer || {};
         ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = first ? 'rgb(13,7,5)' : 'rgba(13,7,5,0.10)';
-        ctx.fillRect(0, 0, w, h);
+        drawBackdrop(ctx, bg, w, h, first ? 1 : 0.10, 'rgb(13,7,5)');
         first = false;
 
         ctx.globalCompositeOperation = 'lighter';
@@ -417,6 +509,7 @@
     var hintGrad = null;
     var hintY = 0;
     var held = null;
+    var bg = null;
     var cols = ['rgba(80,220,160,', 'rgba(110,170,235,', 'rgba(170,120,235,'];
 
     function makeEnt(env, seed, pw) {
@@ -444,13 +537,20 @@
         stars.length = 0;
         var n = countFor(w, h, 55000, 10, 32);
         for (var i = 0; i < n; i++) {
-          stars.push({ x: rand(0, w), y: rand(0, h), r: rand(0.5, 1.3), ph: rand(0, TAU), sp: rand(0.2, 0.8) });
+          stars.push({ x: rand(0, w), y: rand(0, h * 0.72), r: rand(0.5, 1.3), ph: rand(0, TAU), sp: rand(0.2, 0.8) });
         }
         hintY = h * 0.55;
         hintGrad = env.ctx.createLinearGradient(0, hintY, 0, h);
         hintGrad.addColorStop(0, 'rgba(80,200,150,0)');
         hintGrad.addColorStop(0.5, 'rgba(80,200,150,0.045)');
         hintGrad.addColorStop(1, 'rgba(60,150,130,0)');
+        bg = makeBackdrop(env, function (g, W, H) {
+          g.fillStyle = 'rgb(7,9,18)';
+          g.fillRect(0, 0, W, H);
+          // a far mountain ridge, and a nearer, darker one
+          ridge(g, W, H, 0.78, 0.035, 7, 0.015, 17, 0, 'rgb(5,6,12)');
+          ridge(g, W, H, 0.86, 0.03, 5, 0.012, 12, 3, 'rgb(4,5,10)');
+        });
       },
       cast: function (env, seed) {
         seed = seed || {};
@@ -472,8 +572,7 @@
       frame: function (env) {
         var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
         ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = 'rgb(7,9,18)';
-        ctx.fillRect(0, 0, w, h);
+        drawBackdrop(ctx, bg, w, h, 1, 'rgb(7,9,18)');
 
         // ambient whisper: dim stars and a breath of aurora on the horizon
         for (var i = 0; i < stars.length; i++) {
@@ -554,6 +653,7 @@
     var stars = [];
     var first = true;
     var held = null;
+    var bg = null;
     var mx = new Array(12), my = new Array(12);
     var cols = ['rgba(190,160,255,', 'rgba(230,190,255,', 'rgba(255,200,220,', 'rgba(160,170,255,'];
 
@@ -591,6 +691,20 @@
         for (var i = 0; i < n; i++) {
           stars.push({ x: rand(0, env.width), y: rand(0, env.height), ph: rand(0, TAU), sp: rand(0.15, 0.5) });
         }
+        bg = makeBackdrop(env, function (g, W, H) {
+          // deep space: a soft vignette and a faint galactic band
+          var vg = g.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.7);
+          vg.addColorStop(0, 'rgb(13,10,22)');
+          vg.addColorStop(1, 'rgb(8,6,15)');
+          g.fillStyle = vg;
+          g.fillRect(0, 0, W, H);
+          var band = g.createLinearGradient(0, H * 0.15, W, H * 0.85);
+          band.addColorStop(0.3, 'rgba(180,160,220,0)');
+          band.addColorStop(0.5, 'rgba(180,160,220,0.03)');
+          band.addColorStop(0.7, 'rgba(180,160,220,0)');
+          g.fillStyle = band;
+          g.fillRect(0, 0, W, H);
+        });
       },
       cast: function (env, seed) {
         seed = seed || {};
@@ -612,8 +726,7 @@
       frame: function (env) {
         var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
         ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = first ? 'rgb(11,8,19)' : 'rgba(11,8,19,0.08)';
-        ctx.fillRect(0, 0, w, h);
+        drawBackdrop(ctx, bg, w, h, first ? 1 : 0.08, 'rgb(11,8,19)');
         first = false;
 
         ctx.globalCompositeOperation = 'lighter';
@@ -693,6 +806,7 @@
     var motes = [];
     var first = true;
     var held = null;
+    var bg = null;
     var moonX = 0, moonY = 0;
 
     function makeEnt(env, seed, pw) {
@@ -722,6 +836,39 @@
         for (var i = 0; i < n; i++) {
           motes.push({ x: rand(0, w), y: rand(0, h), vx: rand(-4, 4), vy: rand(-2, 2), ph: rand(0, TAU) });
         }
+        bg = makeBackdrop(env, function (g, W, H) {
+          g.fillStyle = 'rgb(5,11,20)'; // the water
+          g.fillRect(0, 0, W, H);
+          g.fillStyle = 'rgb(4,9,16)';  // a slightly darker night sky
+          g.fillRect(0, 0, W, H * 0.37);
+          // the far shore where they meet
+          g.fillStyle = 'rgb(3,7,12)';
+          g.beginPath();
+          var x, step = Math.max(2, W / 26);
+          for (x = 0; x <= W + 1; x += step) {
+            var yy = H * 0.365 + Math.sin(x / W * 5 + 1) * H * 0.006;
+            if (x === 0) g.moveTo(0, yy); else g.lineTo(x, yy);
+          }
+          for (x = W; x >= 0; x -= step) {
+            g.lineTo(x, H * 0.385 + Math.sin(x / W * 5 + 1) * H * 0.006);
+          }
+          g.closePath();
+          g.fill();
+          // a few reeds at the near left edge, rolled once
+          g.strokeStyle = 'rgb(3,7,12)';
+          g.lineCap = 'round';
+          var nr = 4 + Math.round(W / 320);
+          for (var i = 0; i < nr; i++) {
+            var rx = W * 0.03 + i * W * 0.022 + rand(-4, 4);
+            var rh = H * rand(0.08, 0.16);
+            var lean = rand(-8, 14);
+            g.lineWidth = rand(1.5, 2.5);
+            g.beginPath();
+            g.moveTo(rx, H + 2);
+            g.quadraticCurveTo(rx + lean * 0.3, H - rh * 0.6, rx + lean, H - rh);
+            g.stroke();
+          }
+        });
       },
       cast: function (env, seed) {
         seed = seed || {};
@@ -743,8 +890,7 @@
       frame: function (env) {
         var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
         ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = first ? 'rgb(5,11,20)' : 'rgba(5,11,20,0.12)';
-        ctx.fillRect(0, 0, w, h);
+        drawBackdrop(ctx, bg, w, h, first ? 1 : 0.12, 'rgb(5,11,20)');
         first = false;
 
         ctx.globalCompositeOperation = 'lighter';
@@ -862,12 +1008,34 @@
     var first = true;
     var R2 = 200 * 200; // force reach, squared
     var held = null;
+    var bg = null;
     var tierCols = [
       'rgba(85,160,85,0.05)',    // resting moss
       'rgba(70,200,120,0.13)',   // stirred emerald
       'rgba(110,225,140,0.25)',  // rushing emerald
       'rgba(195,245,150,0.4)'    // pale lime highlights
     ];
+
+    // one great tree trunk silhouette, gently swaying in its outline
+    function trunk(g, W, H, cx, wd, ph) {
+      g.fillStyle = 'rgb(3,9,5)';
+      g.beginPath();
+      var half = W * wd * 0.5;
+      var y, wf, sway;
+      g.moveTo(W * cx - half, H + 2);
+      for (y = H; y >= 0; y -= Math.max(1, H / 12)) {
+        wf = 0.6 + 0.4 * (y / H);
+        sway = Math.sin(y / H * 2.3 + ph) * W * 0.012;
+        g.lineTo(W * cx - half * wf + sway, y);
+      }
+      for (y = 0; y <= H; y += Math.max(1, H / 12)) {
+        wf = 0.6 + 0.4 * (y / H);
+        sway = Math.sin(y / H * 2.3 + ph) * W * 0.012;
+        g.lineTo(W * cx + half * wf + sway, y);
+      }
+      g.closePath();
+      g.fill();
+    }
 
     function makeEnt(env, seed, pw) {
       return {
@@ -895,6 +1063,19 @@
           pool.push({ x: rand(0, env.width), y: rand(0, env.height), vx: 0, vy: 0 });
         }
         tier = new Uint8Array(n);
+        bg = makeBackdrop(env, function (g, W, H) {
+          g.fillStyle = 'rgb(5,12,7)';
+          g.fillRect(0, 0, W, H);
+          // the forest floor, faintly mossy
+          var fl = g.createLinearGradient(0, H * 0.72, 0, H);
+          fl.addColorStop(0, 'rgba(12,26,14,0)');
+          fl.addColorStop(1, 'rgba(12,26,14,0.5)');
+          g.fillStyle = fl;
+          g.fillRect(0, H * 0.72, W, H * 0.28);
+          // great trunks at the edges of the clearing
+          trunk(g, W, H, 0.07, 0.055, 0.4);
+          trunk(g, W, H, 0.94, 0.045, 2.1);
+        });
       },
       cast: function (env, seed) {
         seed = seed || {};
@@ -918,8 +1099,7 @@
       frame: function (env) {
         var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
         ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = first ? 'rgb(5,12,7)' : 'rgba(5,12,7,0.12)';
-        ctx.fillRect(0, 0, w, h);
+        drawBackdrop(ctx, bg, w, h, first ? 1 : 0.12, 'rgb(5,12,7)');
         first = false;
         ctx.globalCompositeOperation = 'lighter';
 
@@ -1016,6 +1196,7 @@
     var amb = [];
     var first = true;
     var held = null;
+    var bg = null;
     var cols = ['rgba(235,160,180,', 'rgba(250,205,215,', 'rgba(205,125,155,'];
 
     function makeEnt(env, seed, pw) {
@@ -1058,6 +1239,44 @@
             c: (Math.random() * cols.length) | 0
           });
         }
+        bg = makeBackdrop(env, function (g, W, H) {
+          g.fillStyle = 'rgb(16,9,13)';
+          g.fillRect(0, 0, W, H);
+          // one elegant branch reaches in from the top-right corner
+          g.strokeStyle = 'rgb(10,6,9)';
+          g.lineCap = 'round';
+          var segs = [
+            [1.04, -0.03, 0.85, 0.02, 0.70, 0.10, 7],
+            [0.70, 0.10, 0.60, 0.155, 0.50, 0.17, 4.5],
+            [0.50, 0.17, 0.44, 0.175, 0.40, 0.23, 2.5]
+          ];
+          for (var i = 0; i < segs.length; i++) {
+            var s = segs[i];
+            g.lineWidth = s[6];
+            g.beginPath();
+            g.moveTo(W * s[0], H * s[1]);
+            g.quadraticCurveTo(W * s[2], H * s[3], W * s[4], H * s[5]);
+            g.stroke();
+          }
+          // three twigs, each ending in the faintest rose bud
+          var twigs = [
+            [0.80, 0.055, 0.76, 0.14, 2.2],
+            [0.61, 0.15, 0.56, 0.06, 1.8],
+            [0.44, 0.20, 0.41, 0.29, 1.6]
+          ];
+          for (i = 0; i < twigs.length; i++) {
+            var tw = twigs[i];
+            g.lineWidth = tw[4];
+            g.beginPath();
+            g.moveTo(W * tw[0], H * tw[1]);
+            g.quadraticCurveTo(W * (tw[0] + tw[2]) / 2, H * (tw[1] + tw[3]) / 2 + 6, W * tw[2], H * tw[3]);
+            g.stroke();
+            g.fillStyle = 'rgba(120,70,90,0.28)';
+            g.beginPath();
+            g.arc(W * tw[2], H * tw[3], 2.2, 0, TAU);
+            g.fill();
+          }
+        });
       },
       cast: function (env, seed) {
         seed = seed || {};
@@ -1079,8 +1298,7 @@
       frame: function (env) {
         var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
         ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = first ? 'rgb(16,9,13)' : 'rgba(16,9,13,0.09)';
-        ctx.fillRect(0, 0, w, h);
+        drawBackdrop(ctx, bg, w, h, first ? 1 : 0.09, 'rgb(16,9,13)');
         first = false;
         ctx.globalCompositeOperation = 'lighter';
         ctx.lineWidth = 1.8;
@@ -1146,6 +1364,7 @@
     var amb = [];
     var first = true;
     var held = null;
+    var bg = null;
 
     function makeEnt(env, seed, pw, one) {
       var kin = makeKin(seed, env, 0.3, 30, 440);
@@ -1196,6 +1415,31 @@
             sw: rand(0.5, 1), ph: rand(0, TAU), hue: rand(0, 360)
           });
         }
+        bg = makeBackdrop(env, function (g, W, H) {
+          // underwater depth: brighter toward the surface far above
+          var dg = g.createLinearGradient(0, 0, 0, H);
+          dg.addColorStop(0, 'rgb(14,17,27)');
+          dg.addColorStop(0.5, 'rgb(9,10,18)');
+          dg.addColorStop(1, 'rgb(5,6,12)');
+          g.fillStyle = dg;
+          g.fillRect(0, 0, W, H);
+          // caustic-soft light bands high up
+          g.fillStyle = 'rgba(150,190,230,0.028)';
+          var step = Math.max(2, W / 26);
+          for (var i = 0; i < 3; i++) {
+            var yc = H * (0.07 + 0.08 * i);
+            g.beginPath();
+            for (var x = 0; x <= W + 1; x += step) {
+              var yy = yc + Math.sin(x / W * (5 + i * 2) + i * 1.7) * H * 0.012;
+              if (x === 0) g.moveTo(0, yy); else g.lineTo(x, yy);
+            }
+            for (x = W; x >= 0; x -= step) {
+              g.lineTo(x, yc + H * 0.02 + Math.sin(x / W * (5 + i * 2) + i * 1.7 + 0.7) * H * 0.012);
+            }
+            g.closePath();
+            g.fill();
+          }
+        });
       },
       cast: function (env, seed) {
         seed = seed || {};
@@ -1217,8 +1461,7 @@
       frame: function (env) {
         var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
         ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = first ? 'rgb(9,10,18)' : 'rgba(9,10,18,0.10)';
-        ctx.fillRect(0, 0, w, h);
+        drawBackdrop(ctx, bg, w, h, first ? 1 : 0.10, 'rgb(9,10,18)');
         first = false;
         ctx.globalCompositeOperation = 'lighter';
 
@@ -1330,6 +1573,7 @@
     var amb = [];
     var first = true;
     var held = null;
+    var bg = null;
 
     function makeEnt(env, seed, pw) {
       var kin = makeKin(seed, env, 0.3, 20, 420);
@@ -1375,6 +1619,29 @@
             bph: rand(0, 1)
           });
         }
+        bg = makeBackdrop(env, function (g, W, H) {
+          var sky = g.createLinearGradient(0, 0, 0, H);
+          sky.addColorStop(0, 'rgb(9,12,8)');
+          sky.addColorStop(1, 'rgb(6,8,5)');
+          g.fillStyle = sky;
+          g.fillRect(0, 0, W, H);
+          // a distant tree line across the meadow
+          ridge(g, W, H, 0.58, 0.05, 5, 0.02, 13, 1.3, 'rgb(5,7,4)');
+          // tall grass fringe along the bottom, rolled once
+          g.strokeStyle = 'rgb(4,6,3)';
+          g.lineCap = 'round';
+          var nb = clamp(Math.round(W / 22), 12, 70);
+          for (var i = 0; i < nb; i++) {
+            var gx = (i + rand(0.1, 0.9)) * W / nb;
+            var gh = H * rand(0.05, 0.11);
+            var lean = rand(-8, 8);
+            g.lineWidth = rand(1, 2);
+            g.beginPath();
+            g.moveTo(gx, H + 2);
+            g.quadraticCurveTo(gx + lean * 0.3, H - gh * 0.6, gx + lean, H - gh);
+            g.stroke();
+          }
+        });
       },
       cast: function (env, seed) {
         seed = seed || {};
@@ -1396,8 +1663,7 @@
       frame: function (env) {
         var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
         ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = first ? 'rgb(7,9,6)' : 'rgba(7,9,6,0.10)';
-        ctx.fillRect(0, 0, w, h);
+        drawBackdrop(ctx, bg, w, h, first ? 1 : 0.10, 'rgb(7,9,6)');
         first = false;
         ctx.globalCompositeOperation = 'lighter';
 
