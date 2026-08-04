@@ -1135,6 +1135,340 @@
     };
   }
 
+  /* ------------------------------------------------------------------
+     8. Opal Rise — cast a cluster of soap bubbles: iridescent rims that
+        ride the throw, then let buoyancy take over — rising, swaying,
+        wobbling, until each pops into a soft ring or slips off the top
+  ------------------------------------------------------------------ */
+  function opalRise() {
+    var ents = [];
+    var pops = [];
+    var amb = [];
+    var first = true;
+    var held = null;
+
+    function makeEnt(env, seed, pw, one) {
+      var kin = makeKin(seed, env, 0.3, 30, 440);
+      kin.cruise = rand(10, 20); // the cluster drifts to a hover; buoyancy leads
+      var nb = one ? 1 : 5 + Math.round(pw * 5);
+      var bubbles = [];
+      for (var i = 0; i < nb; i++) {
+        bubbles.push({
+          ox: one ? 0 : rand(-24, 24), oy: one ? 0 : rand(-20, 20),
+          r: one ? 13 : rand(4, 9 + pw * 6),
+          rise: rand(14, 30),
+          sw: rand(0.6, 1.3), swA: rand(4, 10),
+          ph: rand(0, TAU),
+          hue: rand(0, 360),
+          popIn: rand(2.2, 6.5), // seconds of free flight until it pops
+          alive: true,
+          big: !!one
+        });
+      }
+      return {
+        kin: kin, bubbles: bubbles, age: 0, fAge: 0,
+        life: rand(5, 7) + pw * 2,
+        gs: 1, cz: 0, held: false
+      };
+    }
+
+    function pop(px, py, r, hue) {
+      if (pops.length >= 40) return;
+      var drops = [];
+      for (var i = 0; i < 3; i++) drops.push({ a: rand(0, TAU), sp: rand(40, 90) });
+      pops.push({ x: px, y: py, r0: r, hue: hue, age: 0, life: 0.5, drops: drops });
+    }
+
+    return {
+      id: 'opal-rise',
+      name: 'Opal Rise',
+      init: function (env) {
+        ents.length = 0;
+        pops.length = 0;
+        first = true;
+        held = null;
+        amb.length = 0;
+        var n = countFor(env.width, env.height, 250000, 2, 4);
+        for (var i = 0; i < n; i++) {
+          amb.push({
+            x: rand(0, env.width), y: rand(0, env.height),
+            r: rand(1.5, 3), rise: rand(8, 14),
+            sw: rand(0.5, 1), ph: rand(0, TAU), hue: rand(0, 360)
+          });
+        }
+      },
+      cast: function (env, seed) {
+        seed = seed || {};
+        var cz = seedCharge(seed);
+        if (cz > 0 && held) { // seamless handoff: the grown bubble, as-is
+          if (ents.indexOf(held) === -1) capPush(ents, held);
+          releaseHeld(held, seed, 0.3, 30, 440, rand(5, 7) + seedPower(seed) * 2);
+          held = null;
+          return;
+        }
+        var e = makeEnt(env, seed, seedPower(seed));
+        if (cz > 0) {
+          e.cz = cz;
+          e.gs = Math.max(1, 0.4 + 1.6 * cz);
+          e.life += cz * 2.5;
+        }
+        capPush(ents, e);
+      },
+      frame: function (env) {
+        var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = first ? 'rgb(9,10,18)' : 'rgba(9,10,18,0.10)';
+        ctx.fillRect(0, 0, w, h);
+        first = false;
+        ctx.globalCompositeOperation = 'lighter';
+
+        // ambient whisper: two or three tiny bubbles rising faintly
+        ctx.lineWidth = 1;
+        for (var i = 0; i < amb.length; i++) {
+          var m = amb[i];
+          m.y -= m.rise * dt;
+          if (m.y < -6) { m.y = h + 6; m.x = rand(0, w); }
+          ctx.strokeStyle = 'hsla(' + ((t * 8 + m.hue) % 360) + ',70%,75%,0.08)';
+          ctx.beginPath();
+          ctx.arc(m.x + Math.sin(t * m.sw + m.ph) * 8, m.y, m.r, 0, TAU);
+          ctx.stroke();
+        }
+
+        // charge: one big provisional bubble grows in the hand
+        var chg = chargeInfo(env);
+        if (chg) {
+          if (!held) {
+            held = makeEnt(env, { x: chg.x, y: chg.y }, 1, true);
+            held.held = true;
+            capPush(ents, held);
+          }
+          holdEnt(held, chg);
+        } else if (held) {
+          dropHeld(held);
+          held = null;
+        }
+
+        // bubble clusters (the rise clock only runs once free of the hand)
+        ctx.lineWidth = 1.4;
+        for (i = ents.length - 1; i >= 0; i--) {
+          var e = ents[i];
+          e.age += dt;
+          if (e.age >= e.life) { ents.splice(i, 1); continue; }
+          if (!e.held) {
+            stepKin(e.kin, dt, t, 0.5, 0.8, w, h);
+            e.fAge += dt;
+          }
+          var gs = entScale(e, t);
+          var al = lifeAlpha(e.age, e.life) * entGlow(e);
+          for (var j = 0; j < e.bubbles.length; j++) {
+            var q = e.bubbles[j];
+            if (!q.alive) continue;
+            var r = q.r * gs;
+            var px = e.kin.x + q.ox * gs + Math.sin(t * q.sw + q.ph) * q.swA;
+            var py = e.kin.y + q.oy * gs - q.rise * e.fAge;
+            if (py < -r * 2) { q.alive = false; continue; } // off the top
+            if (!e.held && e.fAge >= q.popIn) {
+              q.alive = false;
+              pop(px, py, r, q.hue);
+              if (q.big && e.cz > 0.4) { // a charged bubble bursts into a
+                capPush(ents, makeEnt(env, { x: px, y: py }, 0.5)); // small cascade
+              }
+              continue;
+            }
+            var hue = (t * 8 + q.hue) % 360;
+            var wob = 1 + 0.06 * Math.sin(t * 3 + q.ph);
+            ctx.fillStyle = 'hsla(' + hue + ',70%,70%,' + 0.04 * al + ')';
+            ctx.strokeStyle = 'hsla(' + hue + ',75%,75%,' + 0.5 * al + ')';
+            ctx.beginPath();
+            ctx.ellipse(px, py, r * wob, r * (2 - wob), 0, 0, TAU);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(255,255,255,' + 0.35 * al + ')';
+            ctx.beginPath();
+            ctx.arc(px - r * 0.35, py - r * 0.4, Math.max(0.8, r * 0.16), 0, TAU);
+            ctx.fill();
+          }
+        }
+
+        // pops: a soft expanding ring and a few falling droplets
+        ctx.lineWidth = 1.2;
+        for (i = pops.length - 1; i >= 0; i--) {
+          var pp = pops[i];
+          pp.age += dt;
+          if (pp.age >= pp.life) { pops.splice(i, 1); continue; }
+          var f = pp.age / pp.life;
+          var hue2 = (t * 8 + pp.hue) % 360;
+          ctx.strokeStyle = 'hsla(' + hue2 + ',75%,78%,' + 0.4 * (1 - f) + ')';
+          ctx.beginPath();
+          ctx.arc(pp.x, pp.y, pp.r0 * (1 + f * 1.8), 0, TAU);
+          ctx.stroke();
+          ctx.fillStyle = 'hsla(' + hue2 + ',70%,80%,' + 0.5 * (1 - f) + ')';
+          ctx.beginPath();
+          for (var d = 0; d < pp.drops.length; d++) {
+            var dr = pp.drops[d];
+            var dd = pp.r0 * 0.6 + dr.sp * pp.age;
+            var dx = pp.x + Math.cos(dr.a) * dd;
+            var dy = pp.y + Math.sin(dr.a) * dd + 60 * pp.age * pp.age;
+            ctx.moveTo(dx + 1, dy);
+            ctx.arc(dx, dy, 1, 0, TAU);
+          }
+          ctx.fill();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    };
+  }
+
+  /* ------------------------------------------------------------------
+     9. Firefly Meadow — cast a swarm of warm gold lights: flung with
+        the throw, they scatter and wander aimlessly, blinking on a
+        shared rhythm in loose half-synchrony — bright quick attack,
+        soft decay, near-dark in between
+  ------------------------------------------------------------------ */
+  function fireflyMeadow() {
+    var ents = [];
+    var amb = [];
+    var first = true;
+    var held = null;
+
+    function makeEnt(env, seed, pw) {
+      var kin = makeKin(seed, env, 0.3, 20, 420);
+      kin.cruise = rand(12, 24); // the swarm settles into aimless wandering
+      var nf = Math.min(6 + Math.round(pw * 6), countFor(env.width, env.height, 55000, 6, 12));
+      var flies = [];
+      for (var i = 0; i < nf; i++) {
+        flies.push({
+          ox: rand(-34, 34), oy: rand(-28, 28),
+          w1: rand(0.4, 0.9), p1: rand(0, TAU),
+          w2: rand(0.3, 0.8), p2: rand(0, TAU),
+          bph: rand(0.55, 0.9) // small offsets: loose half-synchrony
+        });
+      }
+      return {
+        kin: kin, flies: flies, age: 0, fAge: 0, bt: 0,
+        life: rand(6, 8) + pw * 2,
+        gs: 1, cz: 0, held: false
+      };
+    }
+
+    // one blink: quick luminance attack, soft decay, dark rest
+    function blink(p) {
+      if (p < 0.08) return p / 0.08;
+      if (p < 0.55) return 1 - (p - 0.08) / 0.47;
+      return 0;
+    }
+
+    return {
+      id: 'firefly-meadow',
+      name: 'Firefly Meadow',
+      init: function (env) {
+        ents.length = 0;
+        first = true;
+        held = null;
+        amb.length = 0;
+        var n = countFor(env.width, env.height, 300000, 2, 4);
+        for (var i = 0; i < n; i++) {
+          amb.push({
+            x: rand(0, env.width), y: rand(0, env.height),
+            w1: rand(0.2, 0.5), p1: rand(0, TAU),
+            w2: rand(0.15, 0.4), p2: rand(0, TAU),
+            bph: rand(0, 1)
+          });
+        }
+      },
+      cast: function (env, seed) {
+        seed = seed || {};
+        var cz = seedCharge(seed);
+        if (cz > 0 && held) { // seamless handoff: the grown swarm, as-is
+          if (ents.indexOf(held) === -1) capPush(ents, held);
+          releaseHeld(held, seed, 0.3, 20, 420, rand(6, 8) + seedPower(seed) * 2);
+          held = null;
+          return;
+        }
+        var e = makeEnt(env, seed, seedPower(seed));
+        if (cz > 0) {
+          e.cz = cz;
+          e.gs = Math.max(1, 0.4 + 1.6 * cz);
+          e.life += cz * 2.5;
+        }
+        capPush(ents, e);
+      },
+      frame: function (env) {
+        var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = first ? 'rgb(7,9,6)' : 'rgba(7,9,6,0.10)';
+        ctx.fillRect(0, 0, w, h);
+        first = false;
+        ctx.globalCompositeOperation = 'lighter';
+
+        // ambient whisper: a few faint wanderers with rare blinks
+        for (var i = 0; i < amb.length; i++) {
+          var m = amb[i];
+          var mpx = m.x + Math.sin(t * m.w1 + m.p1) * 40;
+          var mpy = m.y + Math.sin(t * m.w2 + m.p2) * 30;
+          var mb = blink((t / 6 + m.bph) % 1);
+          if (mb > 0.02) {
+            ctx.fillStyle = 'rgba(255,170,60,' + 0.05 * mb + ')';
+            ctx.beginPath();
+            ctx.arc(mpx, mpy, 2 + 4 * mb, 0, TAU);
+            ctx.fill();
+          }
+          ctx.fillStyle = 'rgba(255,215,120,' + (0.03 + 0.25 * mb) + ')';
+          ctx.beginPath();
+          ctx.arc(mpx, mpy, 1.1, 0, TAU);
+          ctx.fill();
+        }
+
+        // charge: a lantern-dense provisional swarm gathers in the hand
+        var chg = chargeInfo(env);
+        if (chg) {
+          if (!held) {
+            held = makeEnt(env, { x: chg.x, y: chg.y }, 1);
+            held.held = true;
+            capPush(ents, held);
+          }
+          holdEnt(held, chg);
+        } else if (held) {
+          dropHeld(held);
+          held = null;
+        }
+
+        // swarms: wander and blink; charged rhythm relaxes after release
+        for (i = ents.length - 1; i >= 0; i--) {
+          var e = ents[i];
+          e.age += dt;
+          if (e.age >= e.life) { ents.splice(i, 1); continue; }
+          if (!e.held) {
+            stepKin(e.kin, dt, t, 0.5, 0.8, w, h);
+            e.fAge += dt;
+            if (e.cz > 0) e.cz = Math.max(0, e.cz - dt * 0.12);
+          }
+          e.bt += dt * (1 + 0.8 * e.cz); // blink clock, quicker when charged
+          var gs = entScale(e, t);
+          var al = lifeAlpha(e.age, e.life) * entGlow(e);
+          var spread = Math.min(1, 0.35 + e.fAge / 1.5);
+          for (var j = 0; j < e.flies.length; j++) {
+            var q = e.flies[j];
+            var b = blink((e.bt / 2.2 + q.bph) % 1);
+            var px = e.kin.x + q.ox * gs * spread + Math.sin(t * q.w1 + q.p1) * 16;
+            var py = e.kin.y + q.oy * gs * spread + Math.sin(t * q.w2 + q.p2) * 13;
+            if (b > 0.02) { // swelling halo rides each blink
+              ctx.fillStyle = 'rgba(255,170,60,' + 0.10 * b * al + ')';
+              ctx.beginPath();
+              ctx.arc(px, py, (2.5 + 7 * b) * (0.8 + 0.2 * gs), 0, TAU);
+              ctx.fill();
+            }
+            ctx.fillStyle = 'rgba(255,215,120,' + (0.06 + 0.65 * b) * al + ')';
+            ctx.beginPath();
+            ctx.arc(px, py, 1.3 * Math.min(gs, 1.6), 0, TAU);
+            ctx.fill();
+          }
+        }
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    };
+  }
+
   window.SwirlsEffects = [
     driftTide(),
     emberBreath(),
@@ -1142,6 +1476,8 @@
     stillOrbits(),
     nightPond(),
     verdantSurge(),
-    petalFall()
+    petalFall(),
+    opalRise(),
+    fireflyMeadow()
   ];
 })();

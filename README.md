@@ -35,7 +35,8 @@ conduct them.
 - **Drag** — paints a stream of small lives along your path.
 - **Hold** — the life grows and brightens under your finger, pulsing once
   fully charged. Release sends it off exactly as it grew.
-- **`›` button** (bottom-right) or **←/→/space** — change mode (seven species
-  of castable life, each with its own palette and character).
+- **`›` button** (bottom-right) or **←/→/space** — change mode (nine species
+  of castable life, each with its own palette and character). The gear button
+  opens a menu with a live portrait of every species.
 
 Your last mode is remembered between visits.
