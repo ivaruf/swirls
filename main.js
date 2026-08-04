@@ -5,6 +5,9 @@
   var labelEl = document.getElementById('label');
   var hintEl = document.getElementById('hint');
   var nextBtn = document.getElementById('next');
+  var gearBtn = document.getElementById('gear');
+  var menuEl = document.getElementById('menu');
+  var menuPanel = document.getElementById('menu-panel');
   var errorEl = document.getElementById('error');
 
   var effects = window.SwirlsEffects;
@@ -156,6 +159,7 @@
     }
     showLabel(current.name || current.id || 'effect ' + (currentIndex + 1));
     storeSet(KEY_MODE, current.id);
+    updateMenuHighlight();
   }
 
   function switchEffect(dir) {
@@ -344,6 +348,13 @@
   // ---- keyboard ---------------------------------------------------------------
 
   window.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      if (menuOpen) {
+        e.preventDefault();
+        closeMenu();
+      }
+      return;
+    }
     if (e.key === 'ArrowRight' || e.key === ' ' || e.code === 'Space') {
       e.preventDefault();
       switchEffect(1);
@@ -360,9 +371,134 @@
     nextBtn.blur();
   });
 
+  // ---- effect menu (gear) -------------------------------------------------------
+  // A grid of all effects, each with a real portrait rendered at boot by
+  // running the effect briefly on a small offscreen canvas.
+
+  var menuOpen = false;
+  var menuCells = [];
+
+  var THUMB_RENDER = 240; // effects scale element counts by area, so render
+                          // generously and let CSS scale the image down
+
+  function makeThumb(effect) {
+    var tc = document.createElement('canvas');
+    tc.width = THUMB_RENDER;
+    tc.height = THUMB_RENDER;
+    var tenv = {
+      ctx: tc.getContext('2d'),
+      width: THUMB_RENDER,
+      height: THUMB_RENDER,
+      t: 0,
+      dt: 0,
+      pointer: { x: THUMB_RENDER / 2, y: THUMB_RENDER / 2, vx: 0, vy: 0, active: false, down: false },
+      charge: { active: false, x: 0, y: 0, level: 0 }
+    };
+    effect.init(tenv);
+    if (typeof effect.cast === 'function') {
+      effect.cast(tenv, {
+        x: THUMB_RENDER / 2,
+        y: THUMB_RENDER / 2,
+        vx: 60,
+        vy: -40,
+        power: 0.8,
+        charge: 0
+      });
+    }
+    // settle into a characteristic pose: ~110 manually-stepped frames
+    for (var i = 0; i < 110; i++) {
+      tenv.t += 1 / 60;
+      tenv.dt = 1 / 60;
+      effect.frame(tenv);
+    }
+    return tc.toDataURL('image/png');
+  }
+
+  function makeCell(effect, index, thumb) {
+    var cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'menu-cell';
+    var pic;
+    if (thumb) {
+      pic = document.createElement('img');
+      pic.src = thumb;
+      pic.alt = '';
+      pic.draggable = false;
+    } else {
+      pic = document.createElement('div'); // portrait failed: plain dark square
+    }
+    pic.className = 'menu-thumb';
+    cell.appendChild(pic);
+    var name = document.createElement('span');
+    name.textContent = effect.name || effect.id || 'effect ' + (index + 1);
+    cell.appendChild(name);
+    cell.addEventListener('click', function () {
+      dismissHint();
+      setEffect(index);
+      closeMenu();
+    });
+    menuPanel.appendChild(cell);
+    return cell;
+  }
+
+  function buildMenu() {
+    var thumbs = [];
+    var i;
+    // Portraits FIRST, before the live effect's first init: effects are
+    // stateful singletons, so init() during thumbnailing would otherwise
+    // wipe the running scene. Boot re-inits the live effect at full size.
+    for (i = 0; i < effects.length; i++) {
+      try {
+        thumbs[i] = makeThumb(effects[i]);
+      } catch (err) {
+        thumbs[i] = null; // one broken portrait must not kill boot
+        if (window.console && console.error) {
+          console.error('swirls thumbnail error (' + (effects[i] && effects[i].id) + '):', err);
+        }
+      }
+    }
+    for (i = 0; i < effects.length; i++) {
+      menuCells.push(makeCell(effects[i], i, thumbs[i]));
+    }
+  }
+
+  function updateMenuHighlight() {
+    for (var i = 0; i < menuCells.length; i++) {
+      if (i === currentIndex) menuCells[i].classList.add('current');
+      else menuCells[i].classList.remove('current');
+    }
+  }
+
+  function openMenu() {
+    menuOpen = true;
+    updateMenuHighlight();
+    menuEl.classList.add('open');
+    menuEl.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeMenu() {
+    menuOpen = false;
+    menuEl.classList.remove('open');
+    menuEl.setAttribute('aria-hidden', 'true');
+  }
+
+  gearBtn.addEventListener('click', function () {
+    if (menuOpen) closeMenu();
+    else openMenu();
+    gearBtn.blur();
+  });
+
+  // tap/click on the dimmed backdrop (outside the panel) closes the menu;
+  // the overlay sits above the canvas, so none of this ever casts a seed
+  menuEl.addEventListener('click', function (e) {
+    if (e.target === menuEl) closeMenu();
+  });
+
   // ---- boot --------------------------------------------------------------------
 
   sizeCanvas();
+
+  buildMenu(); // must precede setEffect: portraits re-init every effect
 
   var initialIndex = 0;
   var savedId = storeGet(KEY_MODE);
