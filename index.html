@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#050505">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <title>swirls</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      overscroll-behavior: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    #c {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #000;
+      touch-action: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    #label {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(44px + env(safe-area-inset-bottom, 0px));
+      text-align: center;
+      font-size: 12px;
+      line-height: 1.4;
+      letter-spacing: 0.3em;
+      text-transform: lowercase;
+      color: rgba(255, 255, 255, 0.65);
+      opacity: 0;
+      transition: opacity 0.45s ease;
+      pointer-events: none;
+    }
+
+    #hint {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+      text-align: center;
+      font-size: 10px;
+      line-height: 1.4;
+      letter-spacing: 0.2em;
+      text-transform: lowercase;
+      color: rgba(255, 255, 255, 0.35);
+      opacity: 0;
+      transition: opacity 0.45s ease;
+      pointer-events: none;
+    }
+
+    #label.visible,
+    #hint.visible {
+      opacity: 1;
+    }
+
+    #next {
+      position: fixed;
+      right: calc(8px + env(safe-area-inset-right, 0px));
+      bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+      display: block;
+      background: none;
+      border: none;
+      padding: 8px 14px;
+      margin: 0;
+      color: #fff;
+      opacity: 0.4;
+      font-size: 26px;
+      line-height: 1;
+      cursor: pointer;
+      transition: opacity 0.3s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    @media (hover: hover) {
+      #next:hover { opacity: 0.8; }
+    }
+
+    #error {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      letter-spacing: 0.2em;
+      color: rgba(255, 255, 255, 0.5);
+      pointer-events: none;
+    }
+
+    #error.show { display: flex; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="label"></div>
+  <div id="hint">tap or drag to cast &middot; &rsaquo; changes mode</div>
+  <button id="next" type="button" aria-label="next effect">&rsaquo;</button>
+  <div id="error">no effects loaded</div>
+  <script src="effects.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
