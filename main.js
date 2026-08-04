@@ -65,13 +65,19 @@
     lastMoveTime = now;
   }
 
+  // Charge state: while the user holds still, the current species' entity
+  // grows at the fingertip. Effects read env.charge and render the build-up;
+  // release casts the grown entity as-is.
+  var charge = { active: false, x: 0, y: 0, level: 0 };
+
   var env = {
     ctx: ctx,
     width: 0,
     height: 0,
     t: 0,
     dt: 0,
-    pointer: pointer
+    pointer: pointer,
+    charge: charge
   };
 
   var current = null;
@@ -179,6 +185,25 @@
       pointer.vx *= damp;
       pointer.vy *= damp;
     }
+    // Charge build-up: holding still past the delay starts growing the entity;
+    // once charging, the growth point follows the finger until release.
+    if (gesture && pointer.down) {
+      var held = performance.now() - gesture.downTime;
+      if (!gesture.charging && held > CHARGE_DELAY && gesture.moved < CHARGE_MOVE_LIMIT) {
+        gesture.charging = true;
+      }
+      if (gesture.charging) {
+        charge.active = true;
+        charge.x = pointer.x;
+        charge.y = pointer.y;
+        // gentle ease-out: quick early growth, calm approach to full
+        var raw = clamp01((held - CHARGE_DELAY) / CHARGE_TIME);
+        charge.level = 1 - (1 - raw) * (1 - raw);
+      }
+    } else if (charge.active) {
+      charge.active = false;
+      charge.level = 0;
+    }
     try {
       current.frame(env);
     } catch (err) {
@@ -211,19 +236,27 @@
   // Tap = bloom in place. Drag = paint a stream of seeds along the path.
   // A fast release adds one final send-off seed carrying the flick velocity.
 
-  var STREAM_SPACING = 40;  // px of travel between stream seeds
-  var STREAM_MIN_GAP = 40;  // ms between stream seeds
-  var TAP_MOVE_LIMIT = 12;  // px: gestures under this are taps
-  var FLICK_SPEED = 500;    // px/s release speed that counts as a flick
+  var STREAM_SPACING = 40;   // px of travel between stream seeds
+  var STREAM_MIN_GAP = 40;   // ms between stream seeds
+  var TAP_MOVE_LIMIT = 12;   // px: gestures under this are taps
+  var FLICK_SPEED = 500;     // px/s release speed that counts as a flick
+  var CHARGE_DELAY = 250;    // ms of holding still before charging begins
+  var CHARGE_TIME = 1400;    // ms from charge start to full charge
+  var CHARGE_MOVE_LIMIT = 16; // px: movement allowed before the delay elapses
   var gesture = null;
   var loggedCastError = false;
 
   function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 
-  function castSeed(x, y, power) {
+  function castSeed(x, y, power, chargeLevel) {
     if (!current || typeof current.cast !== 'function') return;
     try {
-      current.cast(env, { x: x, y: y, vx: pointer.vx, vy: pointer.vy, power: power });
+      current.cast(env, {
+        x: x, y: y,
+        vx: pointer.vx, vy: pointer.vy,
+        power: power,
+        charge: chargeLevel || 0
+      });
     } catch (err) {
       if (!loggedCastError) {
         loggedCastError = true;
@@ -252,7 +285,9 @@
       moved: 0,
       castX: e.clientX,
       castY: e.clientY,
-      castTime: performance.now()
+      castTime: performance.now(),
+      downTime: performance.now(),
+      charging: false
     };
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     e.preventDefault();
