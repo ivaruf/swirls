@@ -33,7 +33,9 @@ conduct them.
 - **Tap** — a life blooms in place and drifts.
 - **Flick** — sends one flying in that direction with your throw's energy.
 - **Drag** — paints a stream of small lives along your path.
-- **`›` button** (bottom-right) or **←/→/space** — change mode (five species
+- **Hold** — the life grows and brightens under your finger, pulsing once
+  fully charged. Release sends it off exactly as it grew.
+- **`›` button** (bottom-right) or **←/→/space** — change mode (seven species
   of castable life, each with its own palette and character).
 
 Your last mode is remembered between visits.
