@@ -13,6 +13,7 @@
   var effects = window.SwirlsEffects;
   if (!effects || !effects.length) {
     errorEl.classList.add('show');
+    hideSplash();
     return;
   }
 
@@ -494,26 +495,49 @@
     if (e.target === menuEl) closeMenu();
   });
 
+  // ---- boot splash --------------------------------------------------------------
+  // The splash is CSS-only and pointer-events:none for its whole life, so it
+  // can never swallow a cast. This fades it out and drops it from the DOM.
+  // Declared as a function so it hoists above the no-effects early return.
+
+  function hideSplash() {
+    var el = document.getElementById('splash');
+    if (!el) return;
+    el.classList.add('gone');
+    setTimeout(function () {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }, 600);
+  }
+
   // ---- boot --------------------------------------------------------------------
 
   sizeCanvas();
 
-  buildMenu(); // must precede setEffect: portraits re-init every effect
+  function boot() {
+    buildMenu(); // must precede setEffect: portraits re-init every effect
 
-  var initialIndex = 0;
-  var savedId = storeGet(KEY_MODE);
-  if (savedId) {
-    for (var i = 0; i < effects.length; i++) {
-      if (effects[i].id === savedId) {
-        initialIndex = i;
-        break;
+    var initialIndex = 0;
+    var savedId = storeGet(KEY_MODE);
+    if (savedId) {
+      for (var i = 0; i < effects.length; i++) {
+        if (effects[i].id === savedId) {
+          initialIndex = i;
+          break;
+        }
       }
     }
+
+    setEffect(initialIndex);
+    showHintOnce();
+    start();
+    hideSplash();
   }
 
-  setEffect(initialIndex);
-  showHintOnce();
-  start();
+  // Two frames of headroom so the splash is actually on screen before
+  // buildMenu's portrait pass blocks the main thread. The pointer handlers are
+  // already bound and every one of them guards on `current`, so a tap landing
+  // in this window is simply ignored rather than breaking anything.
+  requestAnimationFrame(function () { requestAnimationFrame(boot); });
 
   // PWA: offline support + installability. Skipped on file:// where
   // service workers aren't available.

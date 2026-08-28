@@ -1,6 +1,6 @@
 /* swirls service worker: network-first with cache fallback, so the app
    works offline but picks up new versions on the next online visit. */
-var CACHE = 'swirls-v1';
+var CACHE = 'swirls-v2';
 var ASSETS = [
   './',
   './index.html',
@@ -9,6 +9,7 @@ var ASSETS = [
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
+  './icon-512-maskable.png',
   './apple-touch-icon.png'
 ];
 
