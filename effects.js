@@ -187,6 +187,65 @@
     var bg = null;
     var shades = ['rgba(64,190,180,', 'rgba(40,150,165,', 'rgba(130,225,205,'];
 
+    /* sunlight in water: each shaft is one soft sprite, baked once, drawn
+       sheared so it leans and swings. Both fades below are shared by the
+       bake and the mote lighting, so the light a mote feels is exactly the
+       light that is painted. */
+    var TOP_F = 0.36; // the shaft is this fraction of its width at the surface
+    function depthFade(u) { var v = 1 - u; return v * (0.25 + 0.75 * v); }
+    function edgeFade(q) { var v = 1 - q * q; return v * v; }
+
+    var shaftImg = null;   // the baked sprite, size-independent: made once
+    var shafts = [];       // per-shaft character, rolled at init
+    var lit = [];          // per-frame geometry, reused (never reallocated)
+
+    function makeShaftSprite() {
+      if (typeof document === 'undefined') return null;
+      var SW = 96, SH = 256;
+      var c = document.createElement('canvas');
+      c.width = SW; c.height = SH;
+      var g = c.getContext('2d');
+      if (!g) return null;
+      // feathered across, tapering wider with depth: banded rows of gradient
+      var rows = 48, i, j, p;
+      for (i = 0; i < rows; i++) {
+        var u = i / (rows - 1);
+        var hw = SW * 0.5 * (TOP_F + (1 - TOP_F) * u);
+        var gr = g.createLinearGradient(SW * 0.5 - hw, 0, SW * 0.5 + hw, 0);
+        for (j = 0; j <= 8; j++) {
+          p = j / 8;
+          gr.addColorStop(p, 'rgba(168,232,222,' + edgeFade(Math.abs(p * 2 - 1)).toFixed(3) + ')');
+        }
+        g.fillStyle = gr;
+        var y0 = Math.round(i * SH / rows), y1 = Math.round((i + 1) * SH / rows);
+        g.fillRect(0, y0, SW, y1 - y0); // exact bands: overlap would seam
+      }
+      // and dying away with depth, so there is no bottom edge at all
+      g.globalCompositeOperation = 'destination-in';
+      var vg = g.createLinearGradient(0, 0, 0, SH);
+      for (j = 0; j <= 10; j++) {
+        p = j / 10;
+        vg.addColorStop(p, 'rgba(255,255,255,' + depthFade(p).toFixed(3) + ')');
+      }
+      g.fillStyle = vg;
+      g.fillRect(0, 0, SW, SH);
+      return c;
+    }
+
+    // how much shaft light reaches a point — the same shape that is painted
+    function shaftLight(px, py) {
+      var sum = 0;
+      for (var i = 0; i < lit.length; i++) {
+        var L = lit[i];
+        var u = py / L.D;
+        if (u < 0 || u > 1) continue;
+        var q = (px - (L.cx + L.k * py)) / (L.hw0 + (L.hw1 - L.hw0) * u);
+        if (q < -1 || q > 1) continue;
+        sum += edgeFade(q) * depthFade(u) * L.br;
+      }
+      return sum;
+    }
+
     function makeEnt(env, seed, pw) {
       var kin = makeKin(seed, env, 0.3, 40, 480);
       var nf = 4 + Math.round(pw * 7);
@@ -212,9 +271,28 @@
         first = true;
         held = null;
         motes.length = 0;
-        var n = countFor(env.width, env.height, 70000, 5, 18);
+        var n = countFor(env.width, env.height, 30000, 8, 26);
         for (var i = 0; i < n; i++) {
-          motes.push({ x: rand(0, env.width), y: rand(0, env.height), sp: rand(5, 12) });
+          motes.push({ x: rand(0, env.width), y: rand(0, env.height), sp: rand(5, 12), ph: rand(0, TAU) });
+        }
+        if (!shaftImg) shaftImg = makeShaftSprite();
+        shafts.length = 0;
+        lit.length = 0;
+        // all three lean away from one point on the surface, so they open
+        // like a fan instead of crossing
+        var sunX = rand(0.38, 0.62), spread = rand(0.35, 0.5);
+        for (i = 0; i < 3; i++) {
+          var sx = 0.24 + 0.26 * i + rand(-0.03, 0.03);
+          shafts.push({
+            x: sx,                                  // where it meets the surface
+            wd: rand(0.22, 0.32),                   // width at its widest
+            dp: rand(1.05, 1.3),                    // reaches past the frame
+            lean: (sx - sunX) * spread + rand(-0.02, 0.02), // x drift per y
+            swf: rand(0.035, 0.075), swp: rand(0, TAU), // the long swing
+            brf: rand(0.06, 0.13), brp: rand(0, TAU),   // the slow breath
+            shf: rand(0.17, 0.28), shp: rand(0, TAU)    // a fainter shimmer
+          });
+          lit.push({ cx: 0, k: 0, hw0: 1, hw1: 1, D: 1, br: 0 });
         }
         bg = makeBackdrop(env, function (g, W, H) {
           // the abyss: faintly teal above, dark below, a dune on the seafloor
@@ -250,24 +328,32 @@
         drawBackdrop(ctx, bg, w, h, first ? 1 : 0.22, 'rgb(12,30,36)');
         first = false;
 
-        // scenery in motion: light-shafts sway slowly and breathe (~11-22s)
-        for (var sh = 0; sh < 3; sh++) {
-          var sway = Math.sin(t * 0.28 + sh * 2.1) * w * 0.02;
-          var br = 0.5 + 0.5 * Math.sin(t * 0.55 + sh * 1.7);
-          var x0 = w * (0.22 + 0.26 * sh) + sway;
-          ctx.fillStyle = 'rgba(140,210,205,' + (0.03 + 0.04 * br) + ')';
-          ctx.beginPath();
-          ctx.moveTo(x0, 0);
-          ctx.lineTo(x0 + w * 0.05, 0);
-          ctx.lineTo(x0 + w * 0.16 + sway * 0.5, h * 0.75);
-          ctx.lineTo(x0 + w * 0.02 + sway * 0.5, h * 0.75);
-          ctx.closePath();
-          ctx.fill();
-        }
-
         ctx.globalCompositeOperation = 'lighter';
 
-        // ambient whisper: a few dim motes riding the current
+        // scenery in motion: shafts of surface light leaning into the water,
+        // swinging over ~1.5-3 minutes and breathing as they go
+        for (var sh = 0; sh < shafts.length; sh++) {
+          var sp = shafts[sh], L = lit[sh];
+          var sway = Math.sin(t * sp.swf + sp.swp) * 0.035 +
+                     Math.sin(t * sp.swf * 1.7 + sp.swp * 2.3) * 0.014;
+          var wid = w * sp.wd;
+          L.D = h * sp.dp;
+          L.cx = w * sp.x + sway * w;
+          L.k = sp.lean + sway * 0.5;
+          L.hw0 = wid * 0.5 * TOP_F;
+          L.hw1 = wid * 0.5;
+          L.br = (0.72 + 0.28 * Math.sin(t * sp.brf + sp.brp)) *
+                 (0.88 + 0.12 * Math.sin(t * sp.shf + sp.shp));
+          if (!shaftImg) continue;
+          ctx.save();
+          ctx.globalAlpha = 0.085 * L.br;
+          ctx.transform(1, 0, L.k, 1, 0, 0); // the lean, as a shear
+          ctx.drawImage(shaftImg, L.cx - wid * 0.5, 0, wid, L.D);
+          ctx.restore();
+        }
+
+        // ambient whisper: dim motes riding the current, catching the light
+        // as they drift through a shaft
         ctx.fillStyle = 'rgba(70,180,170,0.09)';
         for (var i = 0; i < motes.length; i++) {
           var m = motes[i];
@@ -276,7 +362,15 @@
           m.y += Math.sin(a) * m.sp * dt;
           if (m.x < -8) m.x = w + 8; else if (m.x > w + 8) m.x = -8;
           if (m.y < -8) m.y = h + 8; else if (m.y > h + 8) m.y = -8;
-          ctx.fillRect(m.x, m.y, 1.5, 1.5);
+          var lum = shaftLight(m.x, m.y);
+          if (lum > 0.03) {
+            var glint = lum * (0.7 + 0.3 * Math.sin(t * 1.1 + m.ph));
+            ctx.fillStyle = 'rgba(175,235,225,' + (0.09 + 0.5 * glint) + ')';
+            ctx.fillRect(m.x - 0.4, m.y - 0.4, 2.3, 2.3);
+            ctx.fillStyle = 'rgba(70,180,170,0.09)';
+          } else {
+            ctx.fillRect(m.x, m.y, 1.5, 1.5);
+          }
         }
 
         // charge: a provisional shoal grows in the hand
@@ -843,13 +937,32 @@
     var reeds = [];
     var moonX = 0, moonY = 0;
 
+    /* the water's edge: the near lip of the far shore, exactly as the
+       backdrop paints it. Only what is at or below this line can disturb
+       the surface — a spirit up in the night sky leaves the water still. */
+    function waterY(x, w, h) {
+      return h * 0.385 + Math.sin(x / w * 5 + 1) * h * 0.006;
+    }
+    // the stretch of a ripple that lies in the water: the arc below `edge`,
+    // or null when the whole ring would sit above it
+    function ringArc(cy, ry, edge) {
+      var s = (edge - cy) / ry;
+      if (s >= 1) return null;
+      return s <= -1 ? -Math.PI / 2 : Math.asin(s);
+    }
+
     function makeEnt(env, seed, pw) {
+      var kin = makeKin(seed, env, 0.3, 35, 460);
       return {
-        kin: makeKin(seed, env, 0.3, 35, 460),
+        kin: kin,
         age: 0, life: rand(4, 6) + pw * 2.5,
         r: 2.8 + pw * 3.2,
         shed: 0, ph: rand(0, TAU),
         sunk: false,
+        wet: kin.y >= waterY(kin.x, env.width, env.height), // born in the water?
+        px: kin.x, py: kin.y, // last drawn point, for the crossing ripple
+        xc: 0,                // cooldown, so a spirit skimming the line
+                              // cannot stutter out a string of ripples
         gs: 1, cz: 0, held: false
       };
     }
@@ -1005,10 +1118,31 @@
           var gs = entScale(e, t);
           var al = lifeAlpha(e.age, e.life) * entGlow(e);
           var hy = k.y + Math.sin(t * 2 + e.ph) * 1.6;
+          var wy = waterY(k.x, w, h);
+          // a 2px dead band, so the bob alone never counts as a crossing
+          var wet = e.wet ? hy > wy - 2 : hy >= wy + 2;
+          e.xc -= dt;
+
+          if (wet !== e.wet) {
+            // the moment of entry (or of leaving): one ring right where the
+            // spirit broke the surface, interpolated to the exact crossing
+            if (e.xc <= 0 && rings.length < 70) {
+              var f = (hy === e.py) ? 0 : clamp((wy - e.py) / (hy - e.py), 0, 1);
+              rings.push({
+                x: e.px + (k.x - e.px) * f, y: wy, age: 0,
+                life: wet ? rand(2.6, 3.4) : rand(2, 2.6),
+                sp: wet ? rand(26, 36) : rand(20, 28),
+                r0: wet ? 3 : 2, a: wet ? 1.3 : 0.8
+              });
+              e.xc = 0.35;
+            }
+            e.wet = wet;
+          }
+          e.px = k.x; e.py = hy;
 
           if (!e.sunk && e.age > e.life * 0.72) {
             e.sunk = true; // the sinking breath: one last wide slow ring
-            rings.push({ x: k.x, y: hy, age: 0, life: 3.6, sp: 20, r0: 8 });
+            if (wet) rings.push({ x: k.x, y: hy, age: 0, life: 3.6, sp: 20, r0: 8, a: 1 });
           }
 
           ctx.fillStyle = 'rgba(150,210,255,' + 0.08 * al + ')';
@@ -1021,13 +1155,15 @@
           ctx.fill();
 
           e.shed -= dt;
-          if (e.shed <= 0 && !e.sunk && rings.length < 70) {
-            rings.push({ x: k.x, y: hy, age: 0, life: rand(2.2, 3.2), sp: rand(22, 34), r0: 2 });
+          // only a spirit in the water leaves a wake in it
+          if (e.shed <= 0 && wet && !e.sunk && rings.length < 70) {
+            rings.push({ x: k.x, y: hy, age: 0, life: rand(2.2, 3.2), sp: rand(22, 34), r0: 2, a: 1 });
             e.shed = clamp(90 / k.sp, 0.18, 0.8); // faster glide, denser wake
           }
         }
 
-        // expanding wake rings, flattened for perspective
+        // expanding wake rings, flattened for perspective and cut off at the
+        // water's edge, the way a ripple slips in behind the far bank
         ctx.lineWidth = 1.3;
         for (i = rings.length - 1; i >= 0; i--) {
           var rp = rings[i];
@@ -1035,14 +1171,21 @@
           if (rp.age >= rp.life) { rings.splice(i, 1); continue; }
           var fade = 1 - rp.age / rp.life;
           var r0 = rp.r0 + rp.age * rp.sp;
-          ctx.strokeStyle = 'rgba(150,205,255,' + 0.20 * fade + ')';
-          ctx.beginPath();
-          ctx.ellipse(rp.x, rp.y, r0, r0 * 0.5, 0, 0, TAU);
-          ctx.stroke();
-          ctx.strokeStyle = 'rgba(150,205,255,' + 0.10 * fade + ')';
-          ctx.beginPath();
-          ctx.ellipse(rp.x, rp.y, r0 * 0.62, r0 * 0.31, 0, 0, TAU);
-          ctx.stroke();
+          var edge = waterY(rp.x, w, h);
+          var s0 = ringArc(rp.y, r0 * 0.5, edge);
+          if (s0 !== null) {
+            ctx.strokeStyle = 'rgba(150,205,255,' + 0.20 * fade * rp.a + ')';
+            ctx.beginPath();
+            ctx.ellipse(rp.x, rp.y, r0, r0 * 0.5, 0, s0, Math.PI - s0);
+            ctx.stroke();
+          }
+          var s1 = ringArc(rp.y, r0 * 0.31, edge);
+          if (s1 !== null) {
+            ctx.strokeStyle = 'rgba(150,205,255,' + 0.10 * fade * rp.a + ')';
+            ctx.beginPath();
+            ctx.ellipse(rp.x, rp.y, r0 * 0.62, r0 * 0.31, 0, s1, Math.PI - s1);
+            ctx.stroke();
+          }
         }
         ctx.globalCompositeOperation = 'source-over';
       }
