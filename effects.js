@@ -1982,6 +1982,395 @@
     };
   }
 
+  /* ------------------------------------------------------------------
+     10. Dusk Fountain — cast a plume of water: it rises, crests and
+         falls back as glowing droplets into the lawn, where every blade
+         it wets glints, leans aside, and slowly settles again
+  ------------------------------------------------------------------ */
+  function duskFountain() {
+    var ents = [];
+    var drops = [];              // preallocated droplet pool: never grows
+    var dGrp = new Uint8Array(0); // per-droplet draw group, reused each frame
+    var dCur = 0, dLive = 0;
+    var spl = [];                // preallocated splash ring buffer
+    var sCur = 0;
+    var blades = [];
+    var amb = [];
+    var first = true;
+    var held = null;
+    var bg = null;
+    var G = 900; // gravity, scaled to the frame so every arc keeps its shape
+    var U = 1;   // droplet unit, so the water still reads at portrait size
+    var gA = 0, gB = 0, gK = 0; // the lawn's surface line
+
+    // three brightness tiers x two droplet sizes, batched into six strokes
+    var TIER = [0.30, 0.30, 0.62, 0.62, 1, 1];
+
+    function groundY(x) { return gA + Math.sin(x * gK + 0.7) * gB; }
+
+    function spawnDrop(x, y, vx, vy, big, bounced) {
+      if (dLive >= drops.length) return;
+      for (var i = 0; i < drops.length; i++) {
+        var d = drops[dCur];
+        dCur = dCur + 1 < drops.length ? dCur + 1 : 0;
+        if (d.alive) continue;
+        d.x = x; d.y = y; d.vx = vx; d.vy = vy;
+        d.age = 0;
+        d.life = bounced ? rand(0.5, 0.9) : rand(1.8, 3);
+        d.big = big;
+        d.bounced = bounced;
+        d.alive = true;
+        dLive++;
+        return;
+      }
+    }
+
+    function addSplash(x, y, p) {
+      var s = spl[sCur];
+      sCur = sCur + 1 < spl.length ? sCur + 1 : 0;
+      s.x = x; s.y = y; s.p = p; s.age = 0; s.life = rand(0.5, 0.8); s.alive = true;
+    }
+
+    // water landing here: the blades nearby take the light and the nudge
+    function wetGrass(x, p) {
+      var rad = (26 + 16 * p) * U;
+      for (var i = 0; i < blades.length; i++) {
+        var b = blades[i];
+        var d = b.x - x;
+        if (d < -rad) continue;
+        if (d > rad) break; // blades are laid down left to right
+        var f = 1 - (d < 0 ? -d : d) / rad;
+        b.gl = Math.min(1, b.gl + 0.6 * f * p);
+        b.kick += (d < 0 ? -1.8 : 1.8) * f * p;
+      }
+    }
+
+    function makeEnt(env, seed, pw) {
+      var kin = makeKin(seed, env, 0.08, 0, 110);
+      var vx = num(seed.vx, 0), vy = num(seed.vy, 0);
+      var sp = Math.hypot(vx, vy);
+      var ax, ay;
+      if (sp > 60) { ax = vx / sp; ay = vy / sp - 1.15; } // thrown, yet always arcing up
+      else { ax = rand(-0.12, 0.12); ay = -1; }           // tap or hold: a straight plume
+      var dur = 0.5 + 0.9 * pw;
+      return {
+        kin: kin,
+        aim: Math.atan2(ay, ax),
+        spread: 0.10 + 0.11 * pw,
+        v0: env.height * (0.40 + 0.44 * pw), // speed follows the frame, so the
+        rate: 70 + 110 * pw,                 // arc has one shape at any size
+        dur: dur, emit: 0, inten: 0,
+        age: 0, fAge: 0, hAge: 0,
+        life: dur + 0.55,
+        gs: 1, cz: 0, held: false
+      };
+    }
+
+    // a released plume subsides over whatever life it was granted
+    function syncDur(e) {
+      e.dur = Math.max(0.35, e.life - e.age - 0.5);
+      e.fAge = 0;
+    }
+
+    return {
+      id: 'dusk-fountain',
+      name: 'Dusk Fountain',
+      init: function (env) {
+        var w = env.width, h = env.height;
+        var i;
+        ents.length = 0;
+        first = true;
+        held = null;
+        dCur = 0; dLive = 0; sCur = 0;
+        G = h * 1.1;
+        U = clamp(h / 780, 0.55, 1.35);
+        gA = h * 0.905; gB = h * 0.007; gK = 4.3 / w;
+
+        var nd = countFor(w, h, 2600, 150, 420);
+        drops.length = 0;
+        for (i = 0; i < nd; i++) {
+          drops.push({ x: 0, y: 0, vx: 0, vy: 0, age: 0, life: 1, big: false, bounced: false, alive: false });
+        }
+        dGrp = new Uint8Array(nd);
+        spl.length = 0;
+        for (i = 0; i < 44; i++) spl.push({ x: 0, y: 0, p: 0, age: 0, life: 1, alive: false });
+
+        amb.length = 0;
+        var n = countFor(w, h, 220000, 2, 5);
+        for (i = 0; i < n; i++) {
+          amb.push({
+            x: rand(0, w), y: h * rand(0.55, 0.88),
+            w1: rand(0.25, 0.6), p1: rand(0, TAU),
+            w2: rand(0.2, 0.5), p2: rand(0, TAU)
+          });
+        }
+
+        bg = makeBackdrop(env, function (g, W, H) {
+          // a garden after sundown: the last light still low in the sky
+          var sky = g.createLinearGradient(0, 0, 0, H);
+          sky.addColorStop(0, 'rgb(22,28,46)');
+          sky.addColorStop(0.55, 'rgb(36,42,58)');
+          sky.addColorStop(0.84, 'rgb(52,54,60)');
+          g.fillStyle = sky;
+          g.fillRect(0, 0, W, H);
+          ridge(g, W, H, 0.80, 0.022, 3.4, 0.011, 8.3, 0.9, 'rgb(11,19,19)');  // the far hedge
+          ridge(g, W, H, 0.865, 0.010, 2.6, 0.006, 6.4, 2.2, 'rgb(18,32,22)'); // the lawn's far edge
+          var lawn = g.createLinearGradient(0, H * 0.88, 0, H);
+          lawn.addColorStop(0, 'rgba(8,17,12,0)');
+          lawn.addColorStop(1, 'rgba(8,17,12,0.62)'); // it darkens toward the near edge
+          g.fillStyle = lawn;
+          g.fillRect(0, H * 0.88, W, H * 0.12);
+        });
+
+        // the lawn, rolled once, leaning per frame in a slow breeze
+        blades.length = 0;
+        var nb = clamp(Math.round(w / 9), 24, 150);
+        for (i = 0; i < nb; i++) {
+          blades.push({
+            x: (i + rand(0.15, 0.85)) * w / nb,
+            gh: h * rand(0.028, 0.085),
+            lean: rand(-7, 7) * U,
+            lw: rand(0.9, 2.1),
+            ph: rand(0, TAU),
+            gl: 0, kick: 0, cl: 0
+          });
+        }
+      },
+      cast: function (env, seed) {
+        seed = seed || {};
+        var cz = seedCharge(seed);
+        if (cz > 0 && held) { // seamless handoff: the grown plume, as-is
+          if (ents.indexOf(held) === -1) capPush(ents, held);
+          releaseHeld(held, seed, 0.08, 0, 110, 1.2 + seedPower(seed) * 0.6);
+          syncDur(held);
+          held = null;
+          return;
+        }
+        var e = makeEnt(env, seed, seedPower(seed));
+        if (cz > 0) {
+          e.cz = cz;
+          e.gs = Math.max(1, 0.4 + 1.6 * cz);
+          e.life += cz * 2.5;
+          syncDur(e);
+        }
+        capPush(ents, e);
+      },
+      frame: function (env) {
+        var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
+        var i, b;
+        ctx.globalCompositeOperation = 'source-over';
+        drawBackdrop(ctx, bg, w, h, first ? 1 : 0.55, 'rgb(30,38,52)');
+        first = false;
+
+        // scenery in motion: the dusk afterglow breathes over the hedge (~11s)
+        var dg = 0.5 + 0.5 * Math.sin(t * 0.58);
+        var dgr = ctx.createLinearGradient(0, h * 0.66, 0, h * 0.83);
+        dgr.addColorStop(0, 'rgba(220,180,140,0)');
+        dgr.addColorStop(1, 'rgba(220,180,140,' + (0.020 + 0.022 * dg) + ')');
+        ctx.fillStyle = dgr;
+        ctx.fillRect(0, h * 0.66, w, h * 0.17);
+
+        // the grass: swaying, still carrying whatever the last drops did to
+        // it. Silhouettes batch into two strokes, one per weight class.
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = 'rgba(7,17,11,0.78)';
+        for (var pass = 0; pass < 2; pass++) {
+          ctx.lineWidth = (pass ? 2.1 : 1.3) * U;
+          ctx.beginPath();
+          for (i = 0; i < blades.length; i++) {
+            b = blades[i];
+            if (pass === 0) { // settle and sway once, on the first pass
+              if (b.gl > 0) b.gl = Math.max(0, b.gl - dt * 0.5);
+              if (b.kick !== 0) b.kick *= Math.max(0, 1 - dt * 1.9);
+              b.cl = b.lean + Math.sin(t * 0.5 - b.x * 0.017) * 4.5 * U +
+                     b.kick * Math.sin(t * 7 + b.ph) * 2.4 * U;
+            }
+            if ((b.lw > 1.5 ? 1 : 0) !== pass) continue;
+            ctx.moveTo(b.x, h + 2);
+            ctx.quadraticCurveTo(b.x + b.cl * 0.35, h - b.gh * 0.55, b.x + b.cl, h - b.gh);
+          }
+          ctx.stroke();
+        }
+
+        ctx.globalCompositeOperation = 'lighter';
+
+        // ambient whisper: a faint sheen along the lawn, midges over it
+        ctx.strokeStyle = 'rgba(96,158,116,0.12)';
+        for (pass = 0; pass < 2; pass++) {
+          ctx.lineWidth = (pass ? 1.7 : 1) * U;
+          ctx.beginPath();
+          for (i = 0; i < blades.length; i++) {
+            b = blades[i];
+            if ((b.lw > 1.5 ? 1 : 0) !== pass) continue;
+            ctx.moveTo(b.x, h + 2);
+            ctx.quadraticCurveTo(b.x + b.cl * 0.35, h - b.gh * 0.55, b.x + b.cl, h - b.gh);
+          }
+          ctx.stroke();
+        }
+        for (i = 0; i < amb.length; i++) {
+          var m = amb[i];
+          ctx.fillStyle = 'rgba(190,205,175,0.08)';
+          ctx.beginPath();
+          ctx.arc(m.x + Math.sin(t * m.w1 + m.p1) * 26,
+                  m.y + Math.sin(t * m.w2 + m.p2) * 16, 1.2 * U, 0, TAU);
+          ctx.fill();
+        }
+
+        // wet blades: only the ones the water reached carry a glint
+        for (i = 0; i < blades.length; i++) {
+          b = blades[i];
+          if (b.gl <= 0.02) continue;
+          ctx.strokeStyle = 'rgba(175,232,208,' + 0.45 * b.gl + ')';
+          ctx.lineWidth = (b.lw * 0.8 + 0.35) * U;
+          ctx.beginPath();
+          ctx.moveTo(b.x, h + 2);
+          ctx.quadraticCurveTo(b.x + b.cl * 0.35, h - b.gh * 0.55, b.x + b.cl, h - b.gh);
+          ctx.stroke();
+        }
+
+        // charge: a provisional plume rises taller and fuller in the hand
+        var chg = chargeInfo(env);
+        if (chg) {
+          if (!held) {
+            held = makeEnt(env, { x: chg.x, y: chg.y }, 1);
+            held.held = true;
+            capPush(ents, held);
+          }
+          holdEnt(held, chg);
+        } else if (held) {
+          dropHeld(held);
+          held = null;
+        }
+
+        // plumes: each is a jet source, throwing droplets along its aim
+        for (i = ents.length - 1; i >= 0; i--) {
+          var e = ents[i];
+          e.age += dt;
+          if (e.age >= e.life) { ents.splice(i, 1); continue; }
+          var target;
+          if (e.held) {
+            e.hAge += dt;
+            target = 1;
+          } else {
+            stepKin(e.kin, dt, t, 0.6, 0.5, w, h);
+            e.fAge += dt;
+            var u = e.fAge / e.dur;
+            target = u >= 1 ? 0 : (1 - u) * (1 - u); // crests, then subsides
+          }
+          e.inten += (target - e.inten) * Math.min(1, 6 * dt);
+          var la = lifeAlpha(e.age, e.life);
+          var gs = entScale(e, t);
+          var al = la * entGlow(e);
+          var flow = e.inten * Math.min(1, la * 1.5);
+          if (flow < 0.01) continue;
+
+          // the water leaves from the lawn's surface at the lowest
+          var sx = e.kin.x;
+          var sy = Math.min(e.kin.y, groundY(sx) - 3 * U);
+          var vs = Math.sqrt(gs); // charge raises the plume, not its violence
+          var kvx = Math.cos(e.kin.h) * e.kin.sp;
+          var kvy = Math.sin(e.kin.h) * e.kin.sp;
+
+          e.emit += e.rate * gs * flow * dt;
+          var nEm = e.emit | 0;
+          if (nEm > 0) {
+            e.emit -= nEm;
+            if (nEm > 6) nEm = 6; // never burst to catch up on a long frame
+            for (var j = 0; j < nEm; j++) {
+              var a = e.aim + rand(-1, 1) * e.spread;
+              var v = e.v0 * vs * rand(0.76, 1.06) * (0.72 + 0.28 * flow);
+              var pj = rand(-1, 1) * 3 * U * gs;
+              spawnDrop(sx + Math.sin(a) * pj, sy - Math.cos(a) * pj,
+                        Math.cos(a) * v + kvx * 0.6, Math.sin(a) * v + kvy * 0.6,
+                        Math.random() < 0.35, false);
+            }
+          }
+
+          // the jet's root: a soft glow and a short bright throat
+          var hr = (5 + 4 * flow) * U * gs;
+          ctx.fillStyle = 'rgba(110,180,225,' + 0.075 * al * flow + ')';
+          ctx.beginPath();
+          ctx.arc(sx, sy, hr * 1.6, 0, TAU);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(205,238,255,' + 0.26 * al * flow + ')';
+          ctx.lineWidth = 2.4 * U * gs;
+          ctx.beginPath();
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(sx + Math.cos(e.aim) * hr * 2.2, sy + Math.sin(e.aim) * hr * 2.2);
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(225,245,255,' + 0.34 * al * flow + ')';
+          ctx.beginPath();
+          ctx.arc(sx, sy, hr * 0.55, 0, TAU);
+          ctx.fill();
+        }
+
+        // droplets: plain ballistics, a little air drag, and the lawn below
+        var air = Math.max(0, 1 - 0.55 * dt);
+        for (i = 0; i < drops.length; i++) {
+          var d = drops[i];
+          if (!d.alive) { dGrp[i] = 255; continue; }
+          d.age += dt;
+          d.vy += G * dt;
+          d.vx *= air; d.vy *= air;
+          d.x += d.vx * dt; d.y += d.vy * dt;
+          if (d.age >= d.life || d.x < -20 || d.x > w + 20) {
+            d.alive = false; dLive--; dGrp[i] = 255; continue;
+          }
+          var gy = groundY(d.x);
+          if (d.y >= gy) {
+            d.alive = false; dLive--; dGrp[i] = 255;
+            var imp = clamp(Math.hypot(d.vx, d.vy) / (h * 0.85), 0.15, 1);
+            if (Math.random() < 0.55) addSplash(d.x, gy, imp); // not every drop rings
+            wetGrass(d.x, imp);
+            if (!d.bounced && imp > 0.35 && Math.random() < 0.45) { // a scatter
+              spawnDrop(d.x, gy - 2 * U, d.vx * 0.28 + rand(-20, 20) * U,
+                        -Math.abs(d.vy) * 0.26, false, true);
+            }
+            continue;
+          }
+          var f = Math.min(1, d.age / 0.06) * Math.min(1, (d.life - d.age) / 0.45);
+          dGrp[i] = (f > 0.66 ? 4 : f > 0.33 ? 2 : 0) + (d.big ? 1 : 0);
+        }
+
+        // drawn as short round-capped streaks: a halo and a core per group
+        for (var g2 = 0; g2 < 6; g2++) {
+          var big = (g2 & 1) === 1;
+          var ga = TIER[g2];
+          for (var lay = 0; lay < 2; lay++) {
+            ctx.strokeStyle = lay === 0
+              ? 'rgba(110,180,225,' + 0.15 * ga + ')'
+              : 'rgba(205,236,255,' + 0.55 * ga + ')';
+            ctx.lineWidth = (lay === 0 ? (big ? 6.5 : 4.2) : (big ? 2.3 : 1.5)) * U;
+            ctx.beginPath();
+            for (i = 0; i < drops.length; i++) {
+              if (dGrp[i] !== g2) continue;
+              var d2 = drops[i];
+              ctx.moveTo(d2.x - d2.vx * 0.030, d2.y - d2.vy * 0.030);
+              ctx.lineTo(d2.x, d2.y);
+            }
+            ctx.stroke();
+          }
+        }
+
+        // where they land: a flat ring opening out through the blades
+        for (i = 0; i < spl.length; i++) {
+          var s = spl[i];
+          if (!s.alive) continue;
+          s.age += dt;
+          if (s.age >= s.life) { s.alive = false; continue; }
+          var sf = s.age / s.life;
+          var sr = (2.5 + 9 * sf) * U * (0.5 + 0.7 * s.p);
+          ctx.strokeStyle = 'rgba(168,228,232,' + 0.17 * (1 - sf) * (1 - sf) * s.p + ')';
+          ctx.lineWidth = 1.1 * U;
+          ctx.beginPath();
+          ctx.ellipse(s.x, s.y, sr, sr * 0.26, 0, 0, TAU);
+          ctx.stroke();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    };
+  }
+
   window.SwirlsEffects = [
     driftTide(),
     emberBreath(),
@@ -1991,6 +2380,7 @@
     verdantSurge(),
     petalFall(),
     opalRise(),
-    fireflyMeadow()
+    fireflyMeadow(),
+    duskFountain()
   ];
 })();
