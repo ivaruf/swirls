@@ -2529,21 +2529,65 @@
 
     var f = null, bg = null, first = true, asleep = true;
     var motes = [];
-    var holding = false, holdSig = 30, holdX = 0, holdY = 0;
-    var spinDir = 1, inkAcc = 0;
+    var holding = false, holdSig = 30, holdX = 0, holdY = 0, holdHue = 1;
+    var spinDir = 1, inkAcc = 0, lastCast = -99;
 
-    // ink: passive tracers, the only thing that is ever drawn
+    /* Ink: passive tracers, the only thing that is ever drawn. A tracer is
+       not a dot — it carries its own STREAKLINE, the last stretch of the path
+       it has actually travelled, resampled by arc length, and it is drawn as
+       one smooth curve through those points. Neighbouring tracers inside an
+       arm therefore lay down near-parallel filaments and the arm reads as
+       silk pulled through water rather than as a chain of beads. */
+    var TRAIL = 13;       // stored points behind the head
     var kcap = 0, kn = 0, kcur = 0;
-    var kx = null, ky = null, kpx = null, kpy = null;  // head, and streak tail
-    var kage = null, klife = null, ktier = null, kang = null;
+    var kx = null, ky = null;                 // head
+    var ttx = null, tty = null;               // streakline rings, kcap * TRAIL
+    var khead = null, klen = null;            // ring head index, points held
+    var kmax = null;      // and how long THIS filament is allowed to grow
+    var kage = null, klife = null;
+    var khue = null, ktier = null, klum = null;
+    var kstep = 4;        // px of travelled path between stored points
 
-    /* five luminance bands, so the whole cloud draws in five batched strokes.
-       The ink is deliberately over-populated and drawn faint: a few hundred
-       bright specks read as confetti, a few thousand dim ones read as dye. */
-    var INK = ['rgba(108,128,178,', 'rgba(138,166,214,', 'rgba(178,200,240,',
-               'rgba(214,230,252,', 'rgba(242,248,255,'];
-    var INK_A = [0.030, 0.052, 0.085, 0.125, 0.180];
-    var FIBRE = 3.4; // px: every tracer lies as a short thread, never a bead
+    // drawing order: the ink is bucketed by (colour, luminance) once a frame
+    var sortIdx = null, bStart = null, bCur = null;
+    // and a coarse census of ink per cell, so a dense core can burn while the
+    // fringe that has spread out of it stays deep and faint
+    var dgx = 0, dgy = 0, dgrid = null;
+    var DG = 20, D_REF = 7;
+
+    /* Five nocturnal inks, ordered cool -> warm. A gesture picks one by a slow
+       random walk biased hard to the cool end, so the pond's colour drifts
+       over a session — teal most of the time, an ember bloom now and then —
+       instead of flickering from cast to cast. Each ink is a six-step ramp
+       from a near-black saturated base to a bright tinted core, and under
+       'lighter' that ramp IS the contrast: dye that has aged and dispersed
+       barely lifts off the water, dye that is fresh and packed blazes. */
+    var NL = 6, NH = 5, NB = NH * NL;
+    var INK = [
+      ['10,52,58', '14,82,94', '24,122,136', '54,168,178', '118,204,210', '200,240,244'],
+      ['22,36,94', '36,62,144', '58,98,190', '98,144,224', '152,190,240', '218,236,252'],
+      ['44,24,88', '68,40,128', '102,64,172', '140,104,202', '184,158,228', '228,220,248'],
+      ['68,16,52', '104,28,72', '150,50,98', '196,92,132', '230,152,178', '250,216,228'],
+      ['64,34,12', '104,60,20', '150,98,36', '198,144,68', '230,188,124', '250,230,200']
+    ];
+    /* the ramp is steep on purpose — a 20x alpha range and a width that
+       narrows as it brightens, so every arm is a broad deep body with a
+       hair-thin lit core running down the middle of it */
+    var INK_A = [0.016, 0.028, 0.048, 0.080, 0.132, 0.235];
+    var INK_W = [5.2, 4.1, 3.2, 2.4, 1.7, 1.1];
+    /* how much of a filament each band is allowed to cover, measured back from
+       the head. The deep wide tones run the whole streak, the bright core only
+       the newest third of it, so every filament tapers out of a lit head into
+       a tail that sinks into the water — dye trailing off, not a lit dash. */
+    var INK_T = [1, 1, 0.9, 0.78, 0.64, 0.5];
+    var BODY_A = 0.012, BODY_W = 7.5; // the diffuse wash the filaments sit in
+    var INK_S = [], BODY_S = [], hueIdx = 1;
+    (function () {
+      for (var q = 0; q < NH; q++) {
+        BODY_S.push('rgba(' + INK[q][2] + ',' + BODY_A + ')');
+        for (var l = 0; l < NL; l++) INK_S.push('rgba(' + INK[q][l] + ',' + INK_A[l] + ')');
+      }
+    })();
 
     /* ---- the fluid: a MAC grid plus an invisible carrier lattice ------
        Index conventions, column-major, exactly as in the original:
@@ -2978,18 +3022,26 @@
 
     // ---- ink ----------------------------------------------------------
 
-    function addInk(x, y, life) {
+    function addInk(x, y, life, hue) {
       var j;
       if (kn < kcap) j = kn++;
       else { j = kcur++; if (kcur >= kcap) kcur = 0; } // recycle round-robin
-      var a = rand(0, TAU);
       kx[j] = x; ky[j] = y;
-      kpx[j] = x - Math.cos(a) * FIBRE; kpy[j] = y - Math.sin(a) * FIBRE;
       kage[j] = 0; klife[j] = life;
-      ktier[j] = 0; kang[j] = a;
+      khue[j] = hue; ktier[j] = 0; klum[j] = 0;
+      /* the streakline is seeded one step behind at a free angle, so a tracer
+         is a short thread from its very first frame and never a bead */
+      var a = rand(0, TAU), b = j * TRAIL;
+      ttx[b] = x - Math.cos(a) * kstep * 0.9;
+      tty[b] = y - Math.sin(a) * kstep * 0.9;
+      khead[j] = 0; klen[j] = 1;
+      /* filaments of one uniform length all end on the same contour and the
+         arm reads as hatching; letting each run out at its own length is what
+         makes the edge of a swirl dissolve instead of stop */
+      kmax[j] = 2 + Math.round((TRAIL - 2) * rand(0.3, 1));
     }
     // a smear of ink along a segment, so a drag lays a continuous ribbon
-    function inkSeg(ax, ay, bx, by, rad, count, life) {
+    function inkSeg(ax, ay, bx, by, rad, count, life, hue) {
       for (var i = 0; i < count; i++) {
         var u = Math.random(), a = rand(0, TAU), rr = rad * Math.sqrt(Math.random());
         /* only a light jitter on the lifetime: neighbouring tracers that fade
@@ -2997,8 +3049,38 @@
            read as one body of dye */
         addInk(ax + (bx - ax) * u + Math.cos(a) * rr,
                ay + (by - ay) * u + Math.sin(a) * rr,
-               life * rand(0.87, 1.13));
+               life * rand(0.87, 1.13), hue);
       }
+    }
+
+    /* One tracer's streakline as a single smooth curve. The stored points are
+       a resampling of a curved path, so the curve is laid through their
+       MIDPOINTS with each stored point as the control handle: that removes
+       every corner the resampling introduced and is what turns a chain of
+       samples into an unbroken filament. */
+    function inkPath(ctx, i, frac) {
+      var b = i * TRAIL, c = klen[i], j = khead[i];
+      if (frac < 1) { c = (c * frac + 0.5) | 0; if (c < 1) c = 1; }
+      var ax = ttx[b + j], ay = tty[b + j], k, nx2, ny2;
+      ctx.moveTo(kx[i], ky[i]);
+      if (c < 2) { ctx.lineTo(ax, ay); return; }
+      for (k = 1; k < c; k++) {
+        j--; if (j < 0) j = TRAIL - 1;
+        nx2 = ttx[b + j]; ny2 = tty[b + j];
+        ctx.quadraticCurveTo(ax, ay, (ax + nx2) * 0.5, (ay + ny2) * 0.5);
+        ax = nx2; ay = ny2;
+      }
+      ctx.lineTo(ax, ay);
+    }
+
+    /* the ink colour walks the palette instead of jumping: one step per
+       GESTURE (a drag keeps the colour it started with), biased downward so
+       the pond lives in teal and blue and only rarely reaches the warm end */
+    function nextHue() {
+      var r = Math.random();
+      if (r < 0.36) hueIdx--; else if (r < 0.56) hueIdx++;
+      hueIdx = clamp(hueIdx, 0, NH - 1);
+      return hueIdx;
     }
 
     return {
@@ -3011,11 +3093,22 @@
         first = true;
         holding = false;
         inkAcc = 0;
-        kcap = countFor(w, h, 100, 900, 4200);
+        lastCast = -99;
+        /* far fewer tracers than before, each drawing many times its own
+           length: continuity comes from the streakline, not from crowding */
+        kstep = clamp(f.s * 0.44, 3, 7);
+        kcap = countFor(w, h, 195, 520, 1900);
         kx = new Float32Array(kcap); ky = new Float32Array(kcap);
-        kpx = new Float32Array(kcap); kpy = new Float32Array(kcap);
+        ttx = new Float32Array(kcap * TRAIL); tty = new Float32Array(kcap * TRAIL);
+        khead = new Uint8Array(kcap); klen = new Uint8Array(kcap);
+        kmax = new Uint8Array(kcap);
         kage = new Float32Array(kcap); klife = new Float32Array(kcap);
-        ktier = new Uint8Array(kcap); kang = new Float32Array(kcap);
+        khue = new Uint8Array(kcap); ktier = new Uint8Array(kcap);
+        klum = new Float32Array(kcap);
+        sortIdx = new Int32Array(kcap);
+        bStart = new Int32Array(NB + 1); bCur = new Int32Array(NB);
+        dgx = Math.ceil(w / DG) + 1; dgy = Math.ceil(h / DG) + 1;
+        dgrid = new Uint16Array(dgx * dgy);
         kn = 0; kcur = 0;
         motes.length = 0;
         var n = countFor(w, h, 90000, 4, 12);
@@ -3055,10 +3148,17 @@
              pushed off along the throw — it meanders and unwinds by itself */
           var js = clamp(sp * 0.26, 25, 320);
           stir(f, holdX, holdY, holdSig * 1.5, 0, ux * js, uy * js, 0.7);
-          inkSeg(holdX, holdY, holdX, holdY, holdSig * 0.9, 90, 7.5);
+          inkSeg(holdX, holdY, holdX, holdY, holdSig * 0.9, 44, 7.5, holdHue);
           holding = false;
+          lastCast = env.t;
           return;
         }
+
+        /* one colour per gesture: a drag streams many seeds in quick
+           succession and must stay one ribbon of one ink, so the palette only
+           steps when a gesture has actually begun */
+        var hue = (env.t - lastCast > 0.35) ? nextHue() : hueIdx;
+        lastCast = env.t;
 
         if (pw <= 0.45) {
           // drag: a stroke of ink laid down with the current that painted it,
@@ -3066,7 +3166,7 @@
           var jd = clamp(sp * 0.24, 40, 260);
           var sd = f.s * 2.1;
           stir(f, x, y, sd, 0, ux * jd, uy * jd, 0.55);
-          inkSeg(x - ux * 26, y - uy * 26, x, y, sd * 0.7, 85, 6.5);
+          inkSeg(x - ux * 26, y - uy * 26, x, y, sd * 0.7, 34, 6.5, hue);
           return;
         }
 
@@ -3086,16 +3186,16 @@
         var la = rand(0, TAU), lc = Math.cos(la), ls = Math.sin(la);
         inkSeg(x + lc * sig * 1.15, y + ls * sig * 1.15,
                x + lc * sig * 0.15, y + ls * sig * 0.15,
-               sig * 0.6, 220 + Math.round(pw * 360), 7 + pw * 2);
+               sig * 0.6, 100 + Math.round(pw * 180), 7 + pw * 2, hue);
         if (cz > 0) { // a charged seed with nothing held: one big slow bloom
           stir(f, x, y, sig * 1.6, omega * sig * (1 + cz) / LO_PEAK * spinDir, 0, 0, 0.6);
           inkSeg(x - lc * sig * 0.9, y - ls * sig * 0.9, x, y,
-                 sig * 0.7, Math.round(140 * cz), 9);
+                 sig * 0.7, Math.round(66 * cz), 9, hue);
         }
       },
       frame: function (env) {
         var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
-        var i, tr;
+        var i;
         ctx.globalCompositeOperation = 'source-over';
         drawBackdrop(ctx, bg, w, h, first ? 1 : 0.18, 'rgb(8,11,18)');
         first = false;
@@ -3118,6 +3218,7 @@
           asleep = false;
           if (!holding) {
             holding = true;
+            holdHue = nextHue();
             if (Math.random() < 0.5) spinDir = -spinDir;
           }
           holdX = chg.x; holdY = chg.y;
@@ -3126,10 +3227,11 @@
           if (chg.lv > 0.9) om *= 1 + 0.14 * Math.sin(t * 5.5);
           stir(f, holdX, holdY, holdSig, om * holdSig / LO_PEAK * spinDir,
                0, 0, 1 - Math.exp(-5 * dt));
-          inkAcc += dt * (90 + 220 * chg.lv);
+          inkAcc += dt * (46 + 110 * chg.lv);
           while (inkAcc >= 1) {
             var ia = rand(0, TAU), ir = holdSig * rand(0.5, 1.15);
-            addInk(holdX + Math.cos(ia) * ir, holdY + Math.sin(ia) * ir, rand(5, 8));
+            addInk(holdX + Math.cos(ia) * ir, holdY + Math.sin(ia) * ir,
+                   rand(5, 8), holdHue);
             inkAcc -= 1;
           }
         } else if (holding) {
@@ -3140,15 +3242,30 @@
         // spiral its own ink outward)
         if (f && !asleep) {
           step(f, dt);
-          var lim = 0.5;
+          /* a coarse census of where the ink actually is. Density is half of
+             the contrast: the packed middle of an arm burns near-white while
+             the same dye, once the shear has pulled it thin, sinks back into
+             the water. */
+          dgrid.fill(0);
+          var gi, gj;
+          for (i = 0; i < kn; i++) {
+            gi = (kx[i] / DG) | 0; gj = (ky[i] / DG) | 0;
+            if (gi < 0) gi = 0; else if (gi >= dgx) gi = dgx - 1;
+            if (gj < 0) gj = 0; else if (gj >= dgy) gj = dgy - 1;
+            dgrid[gi * dgy + gj]++;
+          }
+          var lim = 0.5, st2 = kstep * kstep, ease = Math.min(1, dt * 7);
           for (i = kn - 1; i >= 0; i--) {
             kage[i] += dt;
             if (kage[i] >= klife[i]) {
               kn--;
               if (i !== kn) {
-                kx[i] = kx[kn]; ky[i] = ky[kn]; kpx[i] = kpx[kn]; kpy[i] = kpy[kn];
+                kx[i] = kx[kn]; ky[i] = ky[kn];
                 kage[i] = kage[kn]; klife[i] = klife[kn];
-                ktier[i] = ktier[kn]; kang[i] = kang[kn];
+                khue[i] = khue[kn]; ktier[i] = ktier[kn]; klum[i] = klum[kn];
+                khead[i] = khead[kn]; klen[i] = klen[kn]; kmax[i] = kmax[kn];
+                ttx.copyWithin(i * TRAIL, kn * TRAIL, kn * TRAIL + TRAIL);
+                tty.copyWithin(i * TRAIL, kn * TRAIL, kn * TRAIL + TRAIL);
               }
               continue;
             }
@@ -3160,16 +3277,27 @@
             if (x < lim) x = lim; else if (x > f.iw - lim) x = f.iw - lim;
             if (y < lim) y = lim; else if (y > f.ih - lim) y = f.ih - lim;
             kx[i] = x; ky[i] = y;
-            /* the drawn tail, worked out once here instead of in each of the
-               seven stroke passes: the motion streak, plus a short fixed
-               fibre so that ink at rest still lies as a thread at its own
-               angle rather than as a round bead */
-            var fl = FIBRE * (0.45 + 1.3 * ((kang[i] * 0.618034) % 1)); // varied, free
-            kpx[i] = x - ivx * dt * 2.6 - Math.cos(kang[i]) * fl;
-            kpy[i] = y - ivy * dt * 2.6 - Math.sin(kang[i]) * fl;
-            var lum = lifeAlpha(kage[i], klife[i]) *
-                      (0.3 + 0.7 * Math.min(1, Math.hypot(ivx, ivy) / 200));
-            ktier[i] = clamp(Math.floor(lum * 5), 0, 4);
+            /* resample the streakline by ARC LENGTH rather than by time: slow
+               dye still draws a filament of the same length as fast dye, it
+               just takes longer over it, so nothing anywhere collapses into a
+               dot while the pond is settling */
+            var b = i * TRAIL, hd = khead[i];
+            var sx = x - ttx[b + hd], sy = y - tty[b + hd];
+            if (sx * sx + sy * sy >= st2) {
+              hd++; if (hd >= TRAIL) hd = 0;
+              ttx[b + hd] = x; tty[b + hd] = y;
+              khead[i] = hd;
+              if (klen[i] < kmax[i]) klen[i]++;
+            }
+            gi = (x / DG) | 0; gj = (y / DG) | 0;
+            if (gi < 0) gi = 0; else if (gi >= dgx) gi = dgx - 1;
+            if (gj < 0) gj = 0; else if (gj >= dgy) gj = dgy - 1;
+            var core = 0.62 * Math.min(1, dgrid[gi * dgy + gj] / D_REF) +
+                       0.38 * Math.min(1, Math.hypot(ivx, ivy) / 250);
+            var want = lifeAlpha(kage[i], klife[i]) * (0.10 + 0.90 * core);
+            // eased, so a tracer crossing a census cell never flicks bands
+            klum[i] += (want - klum[i]) * ease;
+            ktier[i] = clamp(Math.floor(klum[i] * NL), 0, NL - 1);
           }
           if (kn === 0 && f.maxSpeed < SLEEP_V) {
             asleep = true; // nothing left to move: the sim costs nothing now
@@ -3179,6 +3307,7 @@
 
         ctx.globalCompositeOperation = 'lighter';
         ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
 
         // ambient whisper: dust on the water, drifting on its own until the
         // pond is stirred, and then carried by it
@@ -3194,48 +3323,57 @@
           ctx.fillRect(m.x, m.y, 1.4, 1.4);
         }
 
-        /* the ink, as short motion streaks: one broad, very faint pass over
-           every particle first, which is what fuses several thousand separate
-           tracers into one continuous body of dye rather than a spray of
-           specks, then one batched stroke per luminance band on top */
+        /* The ink, as filaments. Every tracer is one smooth curve along the
+           path it has ridden; the passes go from a broad near-invisible wash
+           that fuses neighbouring filaments into one sheet of dye, down to a
+           hair-thin blazing core drawn only where the dye is fresh and packed.
+           A counting sort by (colour, luminance) first, so each stroke walks
+           only its own members instead of filtering the whole cloud. */
         if (kn > 0) {
-          // one broad, almost invisible pass for the diffuse body of the dye
-          ctx.beginPath();
-          for (i = 0; i < kn; i++) {
-            ctx.moveTo(kpx[i], kpy[i]);
-            ctx.lineTo(kx[i], ky[i]);
-          }
-          ctx.lineWidth = 8;
-          ctx.strokeStyle = 'rgba(118,152,212,0.015)';
-          ctx.stroke();
-          /* the dye itself, one batched stroke per luminance band. The stroke
-             is deliberately WIDER than the gap between tracers: a hairline per
-             particle would draw the cloud as a spray of separate beads, and it
-             is ink, not confetti. Detail lives in the shape of the cloud. */
-          ctx.lineWidth = 4.2;
-          for (tr = 0; tr < 5; tr++) {
-            ctx.strokeStyle = INK[tr] + INK_A[tr] + ')';
+          bStart.fill(0);
+          for (i = 0; i < kn; i++) bStart[khue[i] * NL + ktier[i] + 1]++;
+          for (i = 0; i < NB; i++) { bStart[i + 1] += bStart[i]; bCur[i] = bStart[i]; }
+          for (i = 0; i < kn; i++) sortIdx[bCur[khue[i] * NL + ktier[i]]++] = i;
+
+          var q, l, a0, a1;
+          // 1. the wash: whole filaments, wide and all but invisible, which is
+          //    what fuses neighbours into one sheet of dye
+          ctx.lineWidth = BODY_W;
+          for (q = 0; q < NH; q++) {
+            a0 = bStart[q * NL]; a1 = bStart[q * NL + NL];
+            if (a1 === a0) continue;
+            ctx.strokeStyle = BODY_S[q];
             ctx.beginPath();
-            for (i = 0; i < kn; i++) {
-              if (ktier[i] !== tr) continue;
-              ctx.moveTo(kpx[i], kpy[i]);
-              ctx.lineTo(kx[i], ky[i]);
-            }
+            for (i = a0; i < a1; i++) inkPath(ctx, sortIdx[i], 1);
             ctx.stroke();
           }
-          // and a hairline highlight only along the fastest threads, which is
-          // where real dye catches the light
-          ctx.lineWidth = 1.2;
-          ctx.strokeStyle = 'rgba(245,250,255,0.15)';
-          ctx.beginPath();
-          for (i = 0; i < kn; i++) {
-            if (ktier[i] < 4) continue;
-            ctx.moveTo(kpx[i], kpy[i]);
-            ctx.lineTo(kx[i], ky[i]);
+          // 2. the tails: every lit filament runs its FULL length in the ink's
+          //    deep tone, so the bright part below has something to fade into
+          ctx.lineWidth = INK_W[1];
+          for (q = 0; q < NH; q++) {
+            a0 = bStart[q * NL + 2]; a1 = bStart[q * NL + NL];
+            if (a1 === a0) continue;
+            ctx.strokeStyle = INK_S[q * NL + 1];
+            ctx.beginPath();
+            for (i = a0; i < a1; i++) inkPath(ctx, sortIdx[i], 1);
+            ctx.stroke();
           }
-          ctx.stroke();
+          // 3. the dye itself: each band over its own head-length of filament,
+          //    brightening and narrowing as it goes up the ramp
+          for (q = 0; q < NH; q++) {
+            for (l = 0; l < NL; l++) {
+              a0 = bStart[q * NL + l]; a1 = bStart[q * NL + l + 1];
+              if (a1 === a0) continue;
+              ctx.lineWidth = INK_W[l];
+              ctx.strokeStyle = INK_S[q * NL + l];
+              ctx.beginPath();
+              for (i = a0; i < a1; i++) inkPath(ctx, sortIdx[i], INK_T[l]);
+              ctx.stroke();
+            }
+          }
         }
         ctx.globalCompositeOperation = 'source-over';
+        ctx.lineJoin = 'miter';
       }
     };
   }
