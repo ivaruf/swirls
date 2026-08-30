@@ -1983,13 +1983,14 @@
   }
 
   /* ------------------------------------------------------------------
-     10. Dusk Fountain — cast a plume of water: it rises, crests and
-         falls back as glowing droplets into the lawn, where every blade
-         it wets glints, leans aside, and slowly settles again
+     10. Dusk Fountain — cast a plume of water: solid ropes of it rise,
+         crest and fall into the lawn, fraying into spray only where the
+         water really breaks — at the crest, and where it lands. Every
+         blade it wets glints, leans aside, and slowly settles again
   ------------------------------------------------------------------ */
   function duskFountain() {
     var ents = [];
-    var drops = [];              // preallocated droplet pool: never grows
+    var drops = [];              // preallocated spray pool: never grows
     var dGrp = new Uint8Array(0); // per-droplet draw group, reused each frame
     var dCur = 0, dLive = 0;
     var spl = [];                // preallocated splash ring buffer
@@ -2000,11 +2001,38 @@
     var held = null;
     var bg = null;
     var G = 900; // gravity, scaled to the frame so every arc keeps its shape
-    var U = 1;   // droplet unit, so the water still reads at portrait size
+    var U = 1;   // water unit, so the fountain still reads at portrait size
     var gA = 0, gB = 0, gK = 0; // the lawn's surface line
+
+    /* A plume is not a cloud of particles but a handful of ropes. Every
+       parcel one nozzle throws travels the same arc, so the stream IS that
+       arc: sampled here from the youngest water, still at the nozzle, to
+       the oldest that is still in the air. Closing the jet simply lifts
+       the near end away and the rope left hanging falls on its own. One
+       scratch buffer serves whichever plume is being drawn, so a frame of
+       water costs a few multiplications and four strokes, and nothing at
+       all is allocated. */
+    var SS = 8;   // ropes per plume, at most
+    var SK = 15;  // samples along one rope
+    var ropeX = new Float32Array(SS * (SK + 1));
+    var ropeY = new Float32Array(SS * (SK + 1));
+    var ropeN = new Uint8Array(SS);
 
     // three brightness tiers x two droplet sizes, batched into six strokes
     var TIER = [0.30, 0.30, 0.62, 0.62, 1, 1];
+
+    /* How a rope is painted: width, alpha, colour, and the stretch of the
+       rope each pass covers. Two nested blooms give the water a soft edge
+       instead of a slab one; the far half is drawn narrower and dimmer, so
+       the stream thins as it falls and hands over to the spray; the bright
+       core and the solid throat stay near the nozzle. */
+    var RW = [3.0, 1.8, 1.30, 0.75, 0.50, 2.0];
+    var RA = [0.045, 0.035, 0.22, 0.15, 0.26, 0.18];
+    var RF = [0, 0.60, 0, 0.58, 0, 0];
+    var RT = [0.66, 1, 0.64, 1, 0.74, 0.30];
+    var RC = ['rgba(26,74,180,', 'rgba(26,74,180,',
+              'rgba(48,120,228,', 'rgba(48,120,228,',
+              'rgba(150,205,255,', 'rgba(95,170,245,'];
 
     function groundY(x) { return gA + Math.sin(x * gK + 0.7) * gB; }
 
@@ -2031,17 +2059,20 @@
       s.x = x; s.y = y; s.p = p; s.age = 0; s.life = rand(0.5, 0.8); s.alive = true;
     }
 
-    // water landing here: the blades nearby take the light and the nudge
-    function wetGrass(x, p) {
+    // water landing here: the blades nearby take the light and the nudge.
+    // `amt` is one drop's worth for a drop, and dt's worth for a rope that
+    // is standing on the lawn pouring
+    function wetGrass(x, p, amt) {
       var rad = (26 + 16 * p) * U;
+      var kick = amt * 2;
       for (var i = 0; i < blades.length; i++) {
         var b = blades[i];
         var d = b.x - x;
         if (d < -rad) continue;
         if (d > rad) break; // blades are laid down left to right
         var f = 1 - (d < 0 ? -d : d) / rad;
-        b.gl = Math.min(1, b.gl + 0.6 * f * p);
-        b.kick += (d < 0 ? -1.8 : 1.8) * f * p;
+        b.gl = Math.min(1, b.gl + amt * f * p);
+        b.kick += (d < 0 ? -kick : kick) * f * p;
       }
     }
 
@@ -2053,22 +2084,39 @@
       if (sp > 60) { ax = vx / sp; ay = vy / sp - 1.15; } // thrown, yet always arcing up
       else { ax = rand(-0.12, 0.12); ay = -1; }           // tap or hold: a straight plume
       var dur = 0.5 + 0.9 * pw;
+      var spread = 0.07 + 0.075 * pw;
+      // the nozzle is really a few nozzles, fanned evenly and set close
+      // enough that their ropes overlap into one body of water low down,
+      // parting only up near the crest. The middle throws highest.
+      var ns = 5 + Math.round(pw * 3);
+      var str = [];
+      for (var i = 0; i < ns; i++) {
+        var q = ns > 1 ? (i / (ns - 1) - 0.5) * 2 : 0;
+        str.push({
+          da: q * spread + rand(-0.012, 0.012),
+          dv: 1 - 0.10 * q * q + rand(-0.03, 0.03),
+          wf: rand(0.35, 0.9), wp: rand(0, TAU), // its own slow waver
+          spl: rand(0, 0.1), brk: rand(0, 0.15), frq: rand(0, 0.2)
+        });
+      }
       return {
-        kin: kin,
-        aim: Math.atan2(ay, ax),
-        spread: 0.10 + 0.11 * pw,
+        kin: kin, str: str,
+        // never dead upright: a fan tilted a hair reads as water, not a bar
+        aim: Math.atan2(ay, ax) + rand(-0.06, 0.06),
+        spread: spread,
         v0: env.height * (0.40 + 0.44 * pw), // speed follows the frame, so the
-        rate: 70 + 110 * pw,                 // arc has one shape at any size
-        dur: dur, emit: 0, inten: 0,
+        dur: dur, inten: 0,                  // arc has one shape at any size
+        eStart: -1, eEnd: -1, // when the jet opened, and when it closed
         age: 0, fAge: 0, hAge: 0,
-        life: dur + 0.55,
+        life: dur + 2.1, // it outlives the jet: water stays up a while
         gs: 1, cz: 0, held: false
       };
     }
 
-    // a released plume subsides over whatever life it was granted
+    // a released plume subsides over whatever life it was granted, keeping
+    // the last stretch free for the water still falling
     function syncDur(e) {
-      e.dur = Math.max(0.35, e.life - e.age - 0.5);
+      e.dur = Math.max(0.35, e.life - e.age - 2.1);
       e.fAge = 0;
     }
 
@@ -2159,7 +2207,7 @@
         var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
         var i, b;
         ctx.globalCompositeOperation = 'source-over';
-        drawBackdrop(ctx, bg, w, h, first ? 1 : 0.55, 'rgb(30,38,52)');
+        drawBackdrop(ctx, bg, w, h, first ? 1 : 0.7, 'rgb(30,38,52)');
         first = false;
 
         // scenery in motion: the dusk afterglow breathes over the hedge (~11s)
@@ -2195,7 +2243,7 @@
         ctx.globalCompositeOperation = 'lighter';
 
         // ambient whisper: a faint sheen along the lawn, midges over it
-        ctx.strokeStyle = 'rgba(96,158,116,0.12)';
+        ctx.strokeStyle = 'rgba(96,158,116,0.15)';
         for (pass = 0; pass < 2; pass++) {
           ctx.lineWidth = (pass ? 1.7 : 1) * U;
           ctx.beginPath();
@@ -2209,7 +2257,7 @@
         }
         for (i = 0; i < amb.length; i++) {
           var m = amb[i];
-          ctx.fillStyle = 'rgba(190,205,175,0.08)';
+          ctx.fillStyle = 'rgba(190,205,175,0.10)';
           ctx.beginPath();
           ctx.arc(m.x + Math.sin(t * m.w1 + m.p1) * 26,
                   m.y + Math.sin(t * m.w2 + m.p2) * 16, 1.2 * U, 0, TAU);
@@ -2220,7 +2268,7 @@
         for (i = 0; i < blades.length; i++) {
           b = blades[i];
           if (b.gl <= 0.02) continue;
-          ctx.strokeStyle = 'rgba(175,232,208,' + 0.45 * b.gl + ')';
+          ctx.strokeStyle = 'rgba(130,210,225,' + 0.34 * b.gl + ')';
           ctx.lineWidth = (b.lw * 0.8 + 0.35) * U;
           ctx.beginPath();
           ctx.moveTo(b.x, h + 2);
@@ -2242,7 +2290,8 @@
           held = null;
         }
 
-        // plumes: each is a jet source, throwing droplets along its aim
+        // plumes: each is a jet, drawn as the ropes of water it is throwing
+        ctx.lineJoin = 'round';
         for (i = ents.length - 1; i >= 0; i--) {
           var e = ents[i];
           e.age += dt;
@@ -2262,46 +2311,118 @@
           var gs = entScale(e, t);
           var al = la * entGlow(e);
           var flow = e.inten * Math.min(1, la * 1.5);
-          if (flow < 0.01) continue;
+
+          // the moment the jet opened, and the moment it closed: the water
+          // thrown between the two is exactly what is still in the air
+          if (e.eStart < 0) {
+            if (flow <= 0.04) continue;
+            e.eStart = e.age;
+          } else if (e.eEnd < 0 && flow <= 0.04) {
+            e.eEnd = e.age;
+          }
 
           // the water leaves from the lawn's surface at the lowest
           var sx = e.kin.x;
           var sy = Math.min(e.kin.y, groundY(sx) - 3 * U);
-          var vs = Math.sqrt(gs); // charge raises the plume, not its violence
+          var gy0 = groundY(sx);
           var kvx = Math.cos(e.kin.h) * e.kin.sp;
           var kvy = Math.sin(e.kin.h) * e.kin.sp;
+          // charge raises the plume; a dying jet loses its pressure and sags
+          var vsc = Math.sqrt(gs) * (0.55 + 0.45 * flow);
+          var sBeg = e.eEnd >= 0 ? e.age - e.eEnd : 0; // the near end, once shut
+          var sTop = e.age - e.eStart;                 // the oldest water aloft
+          var nsr = e.str.length;
+          var alive2 = false;
 
-          e.emit += e.rate * gs * flow * dt;
-          var nEm = e.emit | 0;
-          if (nEm > 0) {
-            e.emit -= nEm;
-            if (nEm > 6) nEm = 6; // never burst to catch up on a long frame
-            for (var j = 0; j < nEm; j++) {
-              var a = e.aim + rand(-1, 1) * e.spread;
-              var v = e.v0 * vs * rand(0.76, 1.06) * (0.72 + 0.28 * flow);
-              var pj = rand(-1, 1) * 3 * U * gs;
-              spawnDrop(sx + Math.sin(a) * pj, sy - Math.cos(a) * pj,
-                        Math.cos(a) * v + kvx * 0.6, Math.sin(a) * v + kvy * 0.6,
-                        Math.random() < 0.35, false);
+          for (var si = 0; si < nsr; si++) {
+            var st = e.str[si];
+            ropeN[si] = 0;
+            var ang = e.aim + st.da + Math.sin(t * st.wf + st.wp) * 0.03;
+            var vv = e.v0 * vsc * st.dv;
+            var vx0 = Math.cos(ang) * vv + kvx * 0.6;
+            var vy0 = Math.sin(ang) * vv + kvy * 0.6;
+            // how long this water needs to come back down to the lawn
+            var sg = (Math.sqrt(vy0 * vy0 + 2 * G * Math.max(1, gy0 - sy)) - vy0) / G;
+            var sEnd = Math.min(sTop, sg);
+            if (sEnd <= sBeg) continue;
+            alive2 = true;
+            var base = si * (SK + 1), ds = (sEnd - sBeg) / SK, k2, s2;
+            for (k2 = 0; k2 <= SK; k2++) {
+              s2 = sBeg + ds * k2;
+              ropeX[base + k2] = sx + vx0 * s2;
+              ropeY[base + k2] = sy + vy0 * s2 + 0.5 * G * s2 * s2;
+            }
+            ropeN[si] = SK + 1;
+
+            // the crest frays: a little water leaves the rope as spray
+            st.frq -= dt;
+            if (st.frq <= 0 && sEnd > 0.3) {
+              st.frq = rand(0.07, 0.19);
+              var sfr = sBeg + (sEnd - sBeg) * rand(0.45, 1);
+              spawnDrop(sx + vx0 * sfr + rand(-2, 2) * U,
+                        sy + vy0 * sfr + 0.5 * G * sfr * sfr,
+                        vx0 * rand(0.85, 1.1) + rand(-14, 14) * U,
+                        (vy0 + G * sfr) * rand(0.85, 1.05) + rand(-14, 14) * U,
+                        Math.random() < 0.3, false);
+            }
+
+            // a rope standing on the lawn keeps that patch of grass wet,
+            // rings it, and throws a little of itself back up
+            if (sEnd >= sg) {
+              var fx = sx + vx0 * sg;
+              var vyf = vy0 + G * sg;
+              var imp2 = clamp(Math.hypot(vx0, vyf) / (h * 0.9), 0.2, 1);
+              wetGrass(fx, imp2, dt * 1.7);
+              st.spl -= dt;
+              if (st.spl <= 0) {
+                st.spl = rand(0.12, 0.26);
+                addSplash(fx, groundY(fx), imp2);
+              }
+              st.brk -= dt;
+              if (st.brk <= 0) {
+                st.brk = rand(0.06, 0.16);
+                spawnDrop(fx, groundY(fx) - 3 * U, vx0 * 0.3 + rand(-26, 26) * U,
+                          -Math.abs(vyf) * 0.22, Math.random() < 0.35, true);
+              }
             }
           }
+          if (!alive2) { // the last of it has landed
+            if (e.eEnd >= 0) e.life = Math.min(e.life, e.age + 0.2);
+            continue;
+          }
 
-          // the jet's root: a soft glow and a short bright throat
-          var hr = (5 + 4 * flow) * U * gs;
-          ctx.fillStyle = 'rgba(110,180,225,' + 0.075 * al * flow + ')';
-          ctx.beginPath();
-          ctx.arc(sx, sy, hr * 1.6, 0, TAU);
-          ctx.fill();
-          ctx.strokeStyle = 'rgba(205,238,255,' + 0.26 * al * flow + ')';
-          ctx.lineWidth = 2.4 * U * gs;
-          ctx.beginPath();
-          ctx.moveTo(sx, sy);
-          ctx.lineTo(sx + Math.cos(e.aim) * hr * 2.2, sy + Math.sin(e.aim) * hr * 2.2);
-          ctx.stroke();
-          ctx.fillStyle = 'rgba(225,245,255,' + 0.34 * al * flow + ')';
-          ctx.beginPath();
-          ctx.arc(sx, sy, hr * 0.55, 0, TAU);
-          ctx.fill();
+          // every rope of this plume, painted in six batched passes
+          var bw = (4.2 + 2.2 * flow) * U * (0.5 + 0.5 * gs);
+          for (var p2 = 0; p2 < 6; p2++) {
+            ctx.lineWidth = bw * RW[p2];
+            ctx.strokeStyle = RC[p2] + RA[p2] * al * (p2 === 5 ? flow : 1) + ')';
+            ctx.beginPath();
+            for (si = 0; si < nsr; si++) {
+              var n2 = ropeN[si];
+              if (n2 < 2) continue;
+              var i0 = (n2 * RF[p2]) | 0;
+              var i1 = Math.ceil(n2 * RT[p2]);
+              if (i1 > n2) i1 = n2;
+              if (i1 - i0 < 2) continue;
+              var b3 = si * (SK + 1);
+              ctx.moveTo(ropeX[b3 + i0], ropeY[b3 + i0]);
+              for (var k3 = i0 + 1; k3 < i1; k3++) ctx.lineTo(ropeX[b3 + k3], ropeY[b3 + k3]);
+            }
+            ctx.stroke();
+          }
+
+          // the nozzle itself: a small pool of deep blue light
+          if (flow > 0.02) {
+            var hr = (4.5 + 3.5 * flow) * U * gs;
+            ctx.fillStyle = 'rgba(40,110,215,' + 0.09 * al * flow + ')';
+            ctx.beginPath();
+            ctx.arc(sx, sy, hr * 1.7, 0, TAU);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(160,210,255,' + 0.22 * al * flow + ')';
+            ctx.beginPath();
+            ctx.arc(sx, sy, hr * 0.5, 0, TAU);
+            ctx.fill();
+          }
         }
 
         // droplets: plain ballistics, a little air drag, and the lawn below
@@ -2320,8 +2441,8 @@
           if (d.y >= gy) {
             d.alive = false; dLive--; dGrp[i] = 255;
             var imp = clamp(Math.hypot(d.vx, d.vy) / (h * 0.85), 0.15, 1);
-            if (Math.random() < 0.55) addSplash(d.x, gy, imp); // not every drop rings
-            wetGrass(d.x, imp);
+            if (Math.random() < 0.4) addSplash(d.x, gy, imp); // not every drop rings
+            wetGrass(d.x, imp, 0.6);
             if (!d.bounced && imp > 0.35 && Math.random() < 0.45) { // a scatter
               spawnDrop(d.x, gy - 2 * U, d.vx * 0.28 + rand(-20, 20) * U,
                         -Math.abs(d.vy) * 0.26, false, true);
@@ -2332,14 +2453,14 @@
           dGrp[i] = (f > 0.66 ? 4 : f > 0.33 ? 2 : 0) + (d.big ? 1 : 0);
         }
 
-        // drawn as short round-capped streaks: a halo and a core per group
+        // spray, drawn as short round-capped streaks: halo and core per group
         for (var g2 = 0; g2 < 6; g2++) {
           var big = (g2 & 1) === 1;
           var ga = TIER[g2];
           for (var lay = 0; lay < 2; lay++) {
             ctx.strokeStyle = lay === 0
-              ? 'rgba(110,180,225,' + 0.15 * ga + ')'
-              : 'rgba(205,236,255,' + 0.55 * ga + ')';
+              ? 'rgba(34,96,205,' + 0.17 * ga + ')'
+              : 'rgba(150,205,255,' + 0.50 * ga + ')';
             ctx.lineWidth = (lay === 0 ? (big ? 6.5 : 4.2) : (big ? 2.3 : 1.5)) * U;
             ctx.beginPath();
             for (i = 0; i < drops.length; i++) {
@@ -2360,7 +2481,7 @@
           if (s.age >= s.life) { s.alive = false; continue; }
           var sf = s.age / s.life;
           var sr = (2.5 + 9 * sf) * U * (0.5 + 0.7 * s.p);
-          ctx.strokeStyle = 'rgba(168,228,232,' + 0.17 * (1 - sf) * (1 - sf) * s.p + ')';
+          ctx.strokeStyle = 'rgba(96,178,242,' + 0.16 * (1 - sf) * (1 - sf) * s.p + ')';
           ctx.lineWidth = 1.1 * U;
           ctx.beginPath();
           ctx.ellipse(s.x, s.y, sr, sr * 0.26, 0, 0, TAU);
