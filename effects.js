@@ -3240,6 +3240,460 @@
     };
   }
 
+/* ------------------------------------------------------------------
+     10. Stone Rill — cast falling water: it pours from the hand, breaks
+         over dark stones, parts into rivulets and beads as it runs off
+         them, and spreads out to nothing on the streambed below
+  ------------------------------------------------------------------ */
+  function stoneRill() {
+    var ents = [];
+    var first = true;
+    var held = null;
+    var bg = null;
+    var rocks = [];   // the stones, exactly as the backdrop paints them
+    var seeps = [];   // ambient: the stones are never quite dry
+    var groundY = 0;
+    var idle = 0;     // seconds since the last water was in the scene
+
+    /* one fixed pool of droplets, filled at init and recycled forever, so
+       that a long pour never allocates a thing */
+    var DROPS = 420;
+    var drops = [];
+    var live = 0;
+    var cur = 0;
+
+    /* the stones: fixed slots, jittered per scene, so water poured anywhere
+       above always finds a stair to fall down. A slot gives the middle of a
+       mound, the height its CROWN breaks at, its half-width, and the side
+       its shoulder leans to — every mound is then sunk deep enough that its
+       underside is buried in the streambed. Only crowns are ever visible,
+       which is what keeps them reading as stone instead of as ovals lying
+       on the floor. */
+    var SLOTS = [
+      [0.31, 0.660, 0.21, -1],
+      [0.72, 0.705, 0.24, 1],
+      [0.13, 0.790, 0.27, 1],
+      [0.55, 0.845, 0.34, -1],
+      [0.91, 0.800, 0.27, -1]
+    ];
+
+    // droplet brightness in three fading bands, so the whole fall draws in
+    // six batched strokes instead of four hundred
+    var GLOW_A = [0.07, 0.04, 0.017];
+    var CORE_A = [0.3, 0.17, 0.075];
+
+    // a mound breaking at `crown`, sunk until its underside is below the bed
+    function addRock(cx, crown, rx) {
+      var ry = Math.max(rx * 0.7, groundY - crown + 6);
+      rocks.push({ cx: cx, cy: crown + ry, rx: rx, ry: ry, top: crown });
+    }
+    // the whole pile as one shape: the crowns, and the bed they rise out of
+    function rockPath(g, W, H) {
+      g.beginPath();
+      for (var k = 0; k < rocks.length; k++) {
+        var r = rocks[k];
+        g.moveTo(r.cx + r.rx, r.cy);
+        g.ellipse(r.cx, r.cy, r.rx, r.ry, 0, 0, TAU);
+      }
+      g.rect(0, groundY, W, H - groundY + 2);
+    }
+
+    function spawn(x, y, vx, vy, life, bead) {
+      if (live >= DROPS) return;
+      for (var i = 0; i < DROPS; i++) {
+        var d = drops[cur];
+        cur = cur + 1 === DROPS ? 0 : cur + 1;
+        if (d.on) continue;
+        d.on = true;
+        live++;
+        d.x = d.px = x;
+        d.y = d.py = y;
+        d.vx = vx;
+        d.vy = vy;
+        d.age = 0;
+        d.life = life;
+        d.bead = bead ? 3 : 0;
+        d.tier = d.bead;
+        return;
+      }
+    }
+
+    function makeEnt(env, seed, pw) {
+      var kin = makeKin(seed, env, 0.32, 30, 560);
+      // water has no opinion of its own: sent slowly, it simply falls
+      if (Math.hypot(num(seed.vx, 0), num(seed.vy, 0)) <= 60) {
+        kin.h = Math.PI / 2 + rand(-0.3, 0.3);
+        kin.sp = rand(10, 30);
+      }
+      var e = {
+        kin: kin,
+        vx: 0, vy: 0,      // the spout's own fall, in plain cartesian
+        age: 0, life: rand(0.7, 1) + pw * 1.6,
+        pw: pw,
+        emit: 0,
+        ph: rand(0, TAU),  // its own rhythm, so a pour comes in gouts
+        puff: 0,           // the handful let go the moment it comes free
+        gs: 1, cz: 0, held: false
+      };
+      fromKin(e);
+      return e;
+    }
+    // the shared helpers speak in heading and speed; the fall speaks in vx/vy
+    function fromKin(e) {
+      e.vx = Math.cos(e.kin.h) * e.kin.sp;
+      e.vy = Math.sin(e.kin.h) * e.kin.sp;
+    }
+
+    return {
+      id: 'stone-rill',
+      name: 'Stone Rill',
+      init: function (env) {
+        var w = env.width, h = env.height, i;
+        ents.length = 0;
+        first = true;
+        held = null;
+        live = 0;
+        cur = 0;
+        idle = 0;
+        groundY = h * 0.93;   // the streambed the stones are sunk into
+
+        drops.length = 0;
+        for (i = 0; i < DROPS; i++) {
+          drops.push({ on: false, x: 0, y: 0, px: 0, py: 0, vx: 0, vy: 0, age: 0, life: 1, bead: 0, tier: 0 });
+        }
+
+        rocks.length = 0;
+        for (i = 0; i < SLOTS.length; i++) {
+          var s = SLOTS[i];
+          var cx = w * (s[0] + rand(-0.025, 0.025));
+          var crown = h * (s[1] + rand(-0.018, 0.018));
+          var rx = w * s[2] * rand(0.86, 1.14);
+          addRock(cx, crown, rx);
+          addRock(cx + s[3] * rx * rand(0.55, 0.8), crown + rx * rand(0.12, 0.26),
+                  rx * rand(0.42, 0.6));
+        }
+
+        seeps.length = 0;
+        var ns = countFor(w, h, 62000, 5, 14);
+        for (i = 0; i < ns; i++) {
+          seeps.push({
+            rk: (Math.random() * rocks.length) | 0,
+            a: -Math.PI / 2 + rand(-0.7, 0.7),
+            dir: Math.random() < 0.5 ? -1 : 1,
+            sp: rand(0.1, 0.24),
+            age: rand(0, 6), life: rand(5, 11)
+          });
+        }
+
+        bg = makeBackdrop(env, function (g, W, H) {
+          // a cold ravine, lit only from somewhere high above
+          var sky = g.createLinearGradient(0, 0, 0, H);
+          sky.addColorStop(0, 'rgb(17,26,37)');
+          sky.addColorStop(0.6, 'rgb(12,19,28)');
+          sky.addColorStop(1, 'rgb(9,15,23)');
+          g.fillStyle = sky;
+          g.fillRect(0, 0, W, H);
+          /* the stones and the bed, as one silhouette: a wet crown laid
+             down first, then the body of the pile over it a hair lower, so
+             only the true outline of the whole pile keeps its light.
+             Stroking each mound instead would rule bright arcs straight
+             across its neighbours and they would read as drawn circles. */
+          rockPath(g, W, H);
+          var rim = g.createLinearGradient(0, H * 0.58, 0, H * 0.99);
+          rim.addColorStop(0, 'rgb(29,43,60)');   // the high crowns catch it
+          rim.addColorStop(0.6, 'rgb(15,23,33)');
+          rim.addColorStop(1, 'rgb(7,12,18)');    // the near stones keep none
+          g.fillStyle = rim;
+          g.fill();
+          g.save();
+          g.translate(0, 1.5);
+          rockPath(g, W, H);
+          g.fillStyle = 'rgb(5,9,14)';
+          g.fill();
+          g.restore();
+          // and what little light falls this far down, gathering on the
+          // higher stones
+          rockPath(g, W, H);
+          var lit = g.createLinearGradient(0, H * 0.6, 0, H * 0.98);
+          lit.addColorStop(0, 'rgba(64,90,118,0.13)');
+          lit.addColorStop(1, 'rgba(64,90,118,0)');
+          g.fillStyle = lit;
+          g.fill();
+        });
+      },
+      cast: function (env, seed) {
+        seed = seed || {};
+        var pw = seedPower(seed);
+        var cz = seedCharge(seed);
+        if (cz > 0 && held) { // seamless handoff: the pour goes on falling
+          if (ents.indexOf(held) === -1) capPush(ents, held);
+          releaseHeld(held, seed, 0.32, 30, 560, rand(0.7, 1) + pw * 1.6);
+          fromKin(held);
+          held.puff = Math.round((3 + 9 * pw) * held.gs);
+          held = null;
+          return;
+        }
+        var e = makeEnt(env, seed, pw);
+        if (cz > 0) {
+          e.cz = cz;
+          e.gs = Math.max(1, 0.4 + 1.6 * cz);
+          e.life += cz * 2.5;
+        }
+        e.puff = Math.round((3 + 9 * pw) * e.gs);
+        capPush(ents, e);
+      },
+      frame: function (env) {
+        var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
+        var sc = h / 760;                     // scene scale, so a portrait
+        var lw = clamp(sc, 0.62, 1.15);       // is the same scene, smaller
+        var G = h * 0.95;                     // gravity
+        var air = Math.max(0, 1 - 0.9 * dt);
+        var i, j, d, e;
+
+        /* water leaves long wakes, so the backdrop is laid down faintly —
+           but a faint one can never quite finish the job: the last two or
+           three levels of a wake round-trip forever and stain the scene
+           where water once ran. So once the water is gone the fade opens
+           right up over a breath, and the scene truly rests. */
+        if (live > 0 || ents.length > 0) idle = 0; else idle += dt;
+        ctx.globalCompositeOperation = 'source-over';
+        drawBackdrop(ctx, bg, w, h, first ? 1 : Math.min(1, 0.17 + idle * 1.2), 'rgb(12,19,28)');
+        first = false;
+
+        // scenery in motion: light sliding over the wet bed, breathing slowly
+        ctx.lineWidth = 1.4 * lw;
+        for (i = 0; i < 3; i++) {
+          var gx = w * (0.5 + 0.3 * Math.sin(t * 0.09 + i * 1.4));
+          ctx.strokeStyle = 'rgba(150,200,240,' +
+            (0.012 + 0.02 * Math.abs(Math.sin(t * 0.33 + i * 1.1))) + ')';
+          ctx.beginPath();
+          ctx.moveTo(gx - w * 0.24, groundY + (i + 1) * 3.4 * lw);
+          ctx.lineTo(gx + w * 0.24, groundY + (i + 1) * 3.4 * lw);
+          ctx.stroke();
+        }
+
+        ctx.globalCompositeOperation = 'lighter';
+
+        // ambient whisper: the stones are never quite dry — slow beads
+        // creeping down their flanks, each dragging a short wet trail,
+        // then drying away and starting again somewhere else
+        ctx.lineCap = 'round';
+        ctx.lineWidth = 1.5 * lw;
+        for (i = 0; i < seeps.length; i++) {
+          var sp = seeps[i];
+          sp.age += dt;
+          if (sp.age > sp.life) {
+            sp.rk = (Math.random() * rocks.length) | 0;
+            sp.a = -Math.PI / 2 + rand(-0.7, 0.7);
+            sp.dir = Math.random() < 0.5 ? -1 : 1;
+            sp.sp = rand(0.1, 0.24);
+            sp.age = 0;
+            sp.life = rand(5, 11);
+          }
+          var rk = rocks[sp.rk];
+          sp.a += sp.dir * sp.sp * (0.25 + Math.abs(Math.cos(sp.a))) * dt;
+          var sy = rk.cy + Math.sin(sp.a) * rk.ry;
+          // it has crept down into the bed: gone, and another starts elsewhere
+          if (sy > groundY) { sp.age = sp.life + 1; continue; }
+          var sa = 0.17 * Math.min(1, sp.age / 1.2, (sp.life - sp.age) / 1.5);
+          if (sa <= 0) continue;
+          // the wet track it has left, taken from the very same curve the
+          // bead is walking, so the streak lies exactly on the stone
+          var back = sp.a - sp.dir * 0.16;
+          ctx.strokeStyle = 'rgba(140,195,240,' + sa * 0.45 + ')';
+          ctx.beginPath();
+          ctx.ellipse(rk.cx, rk.cy, rk.rx, rk.ry, 0,
+                      sp.dir > 0 ? back : sp.a, sp.dir > 0 ? sp.a : back);
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(180,220,252,' + sa + ')';
+          ctx.beginPath();
+          ctx.arc(rk.cx + Math.cos(sp.a) * rk.rx, sy, 1.4 * lw, 0, TAU);
+          ctx.fill();
+        }
+
+        // charge: water gathers and pours from the finger while it is held,
+        // the stream thickening as the hold grows
+        var chg = chargeInfo(env);
+        if (chg) {
+          if (!held) {
+            held = makeEnt(env, { x: chg.x, y: chg.y }, 1);
+            held.held = true;
+            held.puff = 0;
+            capPush(ents, held);
+          }
+          holdEnt(held, chg);
+        } else if (held) {
+          dropHeld(held);
+          held = null;
+        }
+
+        // spouts: each one pours for a second or two, falling as it goes
+        for (i = ents.length - 1; i >= 0; i--) {
+          e = ents[i];
+          e.age += dt;
+          if (e.age >= e.life) { ents.splice(i, 1); continue; }
+          if (!e.held) {
+            e.vy += G * dt;
+            e.kin.x += e.vx * dt;
+            e.kin.y += e.vy * dt;
+          }
+          var gs = entScale(e, t);
+          var al = lifeAlpha(e.age, e.life) * entGlow(e);
+
+          // the handful it was carrying, let go the moment it comes free
+          if (!e.held && e.puff > 0) {
+            for (j = 0; j < e.puff; j++) {
+              spawn(e.kin.x + rand(-8, 8) * gs * lw, e.kin.y + rand(-6, 6) * gs * lw,
+                    e.vx * 0.9 + rand(-45, 45) * sc, e.vy * 0.9 + rand(-12, 45) * sc,
+                    rand(1.7, 2.9), Math.random() < 0.5);
+            }
+            e.puff = 0;
+          }
+
+          // the stream itself, coming in gouts rather than a even thread
+          var rate = (9 + 24 * e.pw) * gs * (0.72 + 0.38 * Math.sin(t * 6.5 + e.ph));
+          e.emit -= dt;
+          for (j = 0; j < 6 && e.emit <= 0; j++) {
+            var wob = (Math.random() - Math.random()) * (3 + 7 * gs) * lw;
+            spawn(e.kin.x + wob, e.kin.y + rand(0, 3) * lw,
+                  e.vx * 0.6 + wob * 2.2 + rand(-22, 22) * sc,
+                  e.vy * 0.6 + rand(4, 30) * sc,
+                  rand(1.8, 3), Math.random() < 0.3);
+            e.emit += 1 / rate;
+          }
+          if (e.emit < 0) e.emit = 0;
+
+          // the mouth: only the soft swell of gathering water. The stream
+          // itself is drawn by the drops leaving it, never by a drawn line
+          var lx = e.vx * 0.04, ly = e.vy * 0.04 + (5 + 6 * gs) * lw;
+          ctx.strokeStyle = 'rgba(110,185,240,' + 0.07 * al + ')';
+          ctx.lineWidth = (2.2 + 4 * gs) * lw;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(e.kin.x, e.kin.y);
+          ctx.lineTo(e.kin.x + lx, e.kin.y + ly);
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(230,247,255,' + 0.22 * al + ')';
+          ctx.beginPath();
+          ctx.arc(e.kin.x, e.kin.y, (1 + 1.1 * gs) * lw, 0, TAU);
+          ctx.fill();
+        }
+
+        // the water: ballistic, deflected by the stones, gone in seconds
+        for (i = 0; i < DROPS; i++) {
+          d = drops[i];
+          if (!d.on) continue;
+          d.age += dt;
+          if (d.age >= d.life) { d.on = false; live--; continue; }
+          d.px = d.x;
+          d.py = d.y;
+          d.vy += G * dt;
+          d.vx *= air;
+          d.x += d.vx * dt;
+          d.y += d.vy * dt;
+
+          /* landing on a stone means being caught just under its face, so
+             the way back out is never further than the step that carried it
+             in. Anything further is not a landing: it is water down in the
+             lens where two mounds overlap, or in behind one, where there is
+             no outside to push it to — and flinging it at a far surface
+             would teleport it clean across the scene. That water has run in
+             behind the stone: let it soak away where it lies.
+             Only crowns deflect at all — below the bed a mound is buried. */
+          var step = Math.abs(d.x - d.px) + Math.abs(d.y - d.py) + 6 * lw;
+          for (j = 0; j < rocks.length && d.y < groundY; j++) {
+            var r = rocks[j];
+            if (d.y < r.top) continue;
+            var ex = (d.x - r.cx) / r.rx, ey = (d.y - r.cy) / r.ry;
+            var e2 = ex * ex + ey * ey;
+            if (e2 >= 1) continue;
+            var el = Math.sqrt(e2);
+            if (el < 1e-3) {                     // dead centre: no way out
+              if (d.life - d.age > 0.25) d.life = d.age + 0.25;
+              continue;
+            }
+            var qx = r.cx + ex / el * r.rx;      // back out along the ray
+            var qy = r.cy + ey / el * r.ry;
+            if (Math.abs(qx - d.x) + Math.abs(qy - d.y) > step * 1.6) {
+              if (d.life - d.age > 0.25) d.life = d.age + 0.25;
+              continue;
+            }
+            d.x = qx;
+            d.y = qy;
+            var nx = ex / r.rx, ny = ey / r.ry;  // the outward normal there
+            var nl = Math.sqrt(nx * nx + ny * ny) || 1;
+            nx /= nl; ny /= nl;
+            var vn = d.vx * nx + d.vy * ny;
+            if (vn >= 0) continue;               // already leaving this one
+            var tx = d.vx - vn * nx, ty = d.vy - vn * ny;
+            var imp = -vn;
+            // barely any bounce: water clings, runs, and loses more of its
+            // pace the harder it lands. The nudge along the face is where a
+            // sheet of water parts into rivulets.
+            var keep = 0.97 - 0.26 * Math.min(1, imp / (320 * sc));
+            var jit = (Math.random() - Math.random()) * imp * 0.26;
+            d.vx = tx * keep + nx * imp * 0.2 - ny * jit;
+            d.vy = ty * keep + ny * imp * 0.2 + nx * jit;
+            if (imp > 130 * sc && Math.random() < 0.55 && live < DROPS - 60) {
+              var n2 = imp > 340 * sc ? 2 : 1;
+              for (var k = 0; k < n2; k++) {
+                var sd = Math.random() < 0.5 ? -1 : 1;
+                var sw = imp * rand(0.1, 0.3) * sd, so = imp * rand(0.05, 0.22);
+                spawn(d.x + nx * 1.5, d.y + ny * 1.5,
+                      tx * rand(0.5, 1) - ny * sw + nx * so,
+                      ty * rand(0.5, 1) + nx * sw + ny * so,
+                      rand(0.7, 1.6), Math.random() < 0.3);
+              }
+            }
+            // and on round the rest: in the crevice where two mounds meet a
+            // drop rests against both, and settling it against only one of
+            // them each frame would jitter it between the two faces
+          }
+
+          if (d.y > groundY) {                 // the bed: it spreads and goes
+            d.y = groundY;
+            // it arrives and runs OUT, not up: a low skitter, then nothing
+            if (d.vy > 200 * sc && Math.random() < 0.3 && live < DROPS - 60) {
+              spawn(d.x, groundY - 1, d.vx * 0.5 + rand(-95, 95) * sc,
+                    -d.vy * rand(0.03, 0.11), rand(0.35, 0.8), 0);
+            }
+            if (d.vy > 0) d.vy *= -0.05;
+            d.vx *= 0.86;
+            if (d.life - d.age > 1) d.life = d.age + rand(0.6, 1);
+          }
+
+          if (d.x < -20 || d.x > w + 20 || d.y > h + 10) { d.on = false; live--; continue; }
+          var f = 1 - d.age / d.life;
+          d.tier = d.bead + (f > 0.62 ? 0 : f > 0.3 ? 1 : 2);
+        }
+
+        // drawn as the streak each drop made this frame: one path per
+        // brightness band, stroked twice — a soft halo, then a bright core
+        ctx.lineCap = 'round';
+        for (var tr = 0; tr < 6; tr++) {
+          var any = false;
+          ctx.beginPath();
+          for (i = 0; i < DROPS; i++) {
+            d = drops[i];
+            if (!d.on || d.tier !== tr) continue;
+            any = true;
+            ctx.moveTo(d.px, d.py);
+            ctx.lineTo(d.x, d.y);
+          }
+          if (!any) continue;
+          var big = tr > 2, fb = tr % 3;
+          ctx.strokeStyle = 'rgba(105,180,240,' + GLOW_A[fb] * (big ? 1.45 : 1) + ')';
+          ctx.lineWidth = (big ? 6.2 : 3.4) * lw;
+          ctx.stroke();
+          ctx.strokeStyle = 'rgba(222,244,255,' + CORE_A[fb] * (big ? 1.1 : 1) + ')';
+          ctx.lineWidth = (big ? 1.9 : 1.1) * lw;
+          ctx.stroke();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    };
+  }
+
   window.SwirlsEffects = [
     driftTide(),
     emberBreath(),
@@ -3251,6 +3705,7 @@
     opalRise(),
     fireflyMeadow(),
     duskFountain(),
-    inkEddy()
+    inkEddy(),
+    stoneRill()
   ];
 })();
