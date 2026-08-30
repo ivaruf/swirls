@@ -3417,6 +3417,8 @@
     var run = null;   // water in transit over stone: area, px^2
     var runB = null;  // scratch for one advection pass
     var wet = null;   // how lately this column carried water, 0..1
+    var colHue = null;  // which stone the eye sees at this column
+    var stoneUp = null; // and how far it stands proud of the bed, px
     var rp = null, rv = null;   // the pool's surface, as a 1-D wave
     var poolVol = 0, runVol = 0, wetAny = false;
 
@@ -3439,6 +3441,30 @@
       [0.47, 0.855, 0.045, 1]
     ];
 
+    /* ---- and what kind of rock each one is ----------------------------
+       Three stones share the ravine: moss over shale, wet slate, and a
+       warm umber grit. Every mound keeps a near-black body — the mass
+       has to read as silhouette or the water has nothing to be bright
+       against — and carries its colour in the two places the eye
+       actually looks for it: the thin lit crown, and the deepening that
+       happens the moment water runs over it. */
+    var HUES = [1, 2, 0, 1, 0];   // one per slot; a shoulder shares its mound's
+    var STONE = [
+      { hi: 'rgb(14,23,15)', mid: 'rgb(9,15,10)', lo: 'rgb(5,9,7)',       // moss
+        rim: '108,142,96' },
+      { hi: 'rgb(12,20,29)', mid: 'rgb(8,14,21)', lo: 'rgb(5,8,13)',      // slate
+        rim: '104,140,180' },
+      { hi: 'rgb(21,16,11)', mid: 'rgb(13,11,8)', lo: 'rgb(8,7,5)',       // umber
+        rim: '152,114,74' }
+    ];
+    /* wet stone is darker and richer for it: one pass takes the colour
+       down toward that rock's own deep tone, the second gives back the
+       saturation water really does lift out of a stone. */
+    var WET_D = ['rgba(4,12,6,0.28)', 'rgba(3,8,14,0.28)', 'rgba(11,7,4,0.28)'];
+    var WET_R = ['rgba(34,62,40,0.17)', 'rgba(24,54,86,0.17)', 'rgba(70,46,22,0.17)'];
+    // a drowned crown, still showing its own colour up through the pool
+    var SUNK = ['rgba(38,66,44,0.10)', 'rgba(28,60,96,0.10)', 'rgba(76,52,28,0.10)'];
+
     // spray: a small pool now, since spray is only what an impact throws
     var DROPS = 240;
     var drops = [];
@@ -3452,8 +3478,8 @@
 
     // spray brightness in three fading bands, so the whole scatter draws
     // in six batched strokes instead of two hundred
-    var GLOW_A = [0.085, 0.05, 0.021];
-    var CORE_A = [0.36, 0.21, 0.09];
+    var GLOW_A = [0.115, 0.068, 0.029];
+    var CORE_A = [0.45, 0.27, 0.118];
 
     /* ---- water as rope, not as beads ---------------------------------
        Every mouth keeps the last two seconds of what it poured: where it
@@ -3493,12 +3519,12 @@
        and its far end fades out rather than ending on a hard cap that
        would draw its own ghost across the wake. */
     var RW = [2.6, 1.35, 0.72, 0.50, 0.30, 0.22];
-    var RA = [0.024, 0.050, 0.058, 0.024, 0.115, 0.045];
+    var RA = [0.036, 0.074, 0.084, 0.036, 0.155, 0.062];
     var RF = [0, 0, 0, 0.68, 0, 0.55];
     var RT = [0.5, 0.42, 0.78, 1, 0.62, 0.88];
-    var RC = ['rgba(40,94,158,', 'rgba(58,128,198,',
-              'rgba(120,182,235,', 'rgba(110,172,226,',
-              'rgba(220,244,255,', 'rgba(200,230,252,'];
+    var RC = ['rgba(56,122,194,', 'rgba(78,158,230,',
+              'rgba(152,210,250,', 'rgba(140,200,244,',
+              'rgba(234,251,255,', 'rgba(216,242,255,'];
     var DDMAX = 1.5;   // seconds of water a rope still in the air may show
     // three strengths of stream, so every rope in the scene is drawn in
     // twelve strokes however many mouths are pouring at once
@@ -3512,9 +3538,9 @@
       return groundY - BOWL * u * u;
     }
     // a mound breaking at `crown`, sunk until its underside is below the bed
-    function addRock(cx, crown, rx) {
+    function addRock(cx, crown, rx, hue) {
       var ry = Math.max(rx * 0.7, bedY(cx) - crown + 6);
-      rocks.push({ cx: cx, cy: crown + ry, rx: rx, ry: ry, top: crown });
+      rocks.push({ cx: cx, cy: crown + ry, rx: rx, ry: ry, top: crown, hue: hue });
     }
     // the whole pile as one shape: the crowns, and the bed they rise out of
     function rockPath(g, W, H) {
@@ -3856,10 +3882,13 @@
           var cx = w * (s[0] + rand(-0.025, 0.025));
           var crown = h * (s[1] + rand(-0.018, 0.018));
           var rx = w * s[2] * rand(0.86, 1.14);
-          addRock(cx, crown, rx);
+          addRock(cx, crown, rx, HUES[i]);
           addRock(cx + s[3] * rx * rand(0.55, 0.8), crown + rx * rand(0.12, 0.26),
-                  rx * rand(0.42, 0.6));
+                  rx * rand(0.42, 0.6), HUES[i]);
         }
+        // painted back to front: the lower a crown breaks, the nearer the
+        // stone, so its lit edge laps over the mass standing behind it
+        rocks.sort(function (p, q) { return p.top - q.top; });
 
         // the bed, read off the stones once: the only surface water sees
         COLS = clamp(Math.round(w / 6), 30, 190);
@@ -3872,18 +3901,24 @@
         run = new Float32Array(COLS);
         runB = new Float32Array(COLS);
         wet = new Float32Array(COLS);
+        colHue = new Uint8Array(COLS);
+        stoneUp = new Float32Array(COLS);
         rp = new Float32Array(COLS);
         rv = new Float32Array(COLS);
         for (i = 0; i < COLS; i++) {
-          var x = (i + 0.5) * colW, y = bedY(x);
+          var x = (i + 0.5) * colW, by = bedY(x), y = by, hu = 1;
           for (var k = 0; k < rocks.length; k++) {
             var r = rocks[k];
             var u = (x - r.cx) / r.rx;
             if (u <= -1 || u >= 1) continue;
             var yy = r.cy - r.ry * Math.sqrt(1 - u * u);
-            if (yy < y) y = yy;
+            // the topmost mound here is the one the eye sees, so it is
+            // also the one whose colour the water has to work with
+            if (yy < y) { y = yy; hu = r.hue; }
           }
           fl[i] = y;
+          colHue[i] = hu;
+          stoneUp[i] = by - y;
         }
         for (i = 0; i < COLS; i++) {
           var lo = i > 0 ? i - 1 : 0, hi = i < COLS - 1 ? i + 1 : COLS - 1;
@@ -3912,37 +3947,81 @@
         }
 
         bg = makeBackdrop(env, function (g, W, H) {
-          // a cold ravine, lit only from somewhere high above
+          // a ravine under a high moon: cold air, and stone that is not
+          // quite black once your eyes are used to the dark
           var sky = g.createLinearGradient(0, 0, 0, H);
-          sky.addColorStop(0, 'rgb(17,26,37)');
-          sky.addColorStop(0.6, 'rgb(12,19,28)');
-          sky.addColorStop(1, 'rgb(9,15,23)');
+          sky.addColorStop(0, 'rgb(26,39,55)');
+          sky.addColorStop(0.6, 'rgb(18,28,41)');
+          sky.addColorStop(1, 'rgb(13,21,32)');
           g.fillStyle = sky;
           g.fillRect(0, 0, W, H);
-          /* the stones and the bed, as one silhouette: a wet crown laid
-             down first, then the body of the pile over it a hair lower, so
-             only the true outline of the whole pile keeps its light.
-             Stroking each mound instead would rule bright arcs straight
-             across its neighbours and they would read as drawn circles. */
-          rockPath(g, W, H);
-          var rim = g.createLinearGradient(0, H * 0.58, 0, H * 0.99);
-          rim.addColorStop(0, 'rgb(29,43,60)');   // the high crowns catch it
-          rim.addColorStop(0.6, 'rgb(15,23,33)');
-          rim.addColorStop(1, 'rgb(7,12,18)');    // the near stones keep none
-          g.fillStyle = rim;
-          g.fill();
+          /* every mound in its own rock: the whole ellipse in that stone's
+             lit tone, and its body dropped over it by a hair, so all that
+             survives of the lit fill is the thin crown where light grazes
+             the edge. Stroking the mounds instead would rule hard arcs
+             across their neighbours and they would read as drawn circles;
+             a lit fill under an offset body only ever shows on a true
+             edge. Clipped to the air above the streambed, so a mound is
+             the crown it breaks with and never the whole buried oval.
+             Both ramps are read off the frame, not off the mound, so one
+             light governs the ravine and the deep stones keep least of
+             it — and the body stays near black, because the water has to
+             have something dark to be bright against. */
+          var step = Math.max(3, W / 48), q, k2;
           g.save();
-          g.translate(0, 1.5);
-          rockPath(g, W, H);
-          g.fillStyle = 'rgb(5,9,14)';
-          g.fill();
+          g.beginPath();
+          g.moveTo(0, 0);
+          g.lineTo(W, 0);
+          g.lineTo(W, bedY(W));
+          for (k2 = W; k2 >= 0; k2 -= step) g.lineTo(k2, bedY(k2));
+          g.lineTo(0, bedY(0));
+          g.closePath();
+          g.clip();
+          var rimW = 1.3 + 0.5 * SC;
+          for (q = 0; q < rocks.length; q++) {
+            var rk = rocks[q], sn = STONE[rk.hue];
+            /* the lit fill is a cap, not an outline: brightest where the
+               crown faces the light and gone a third of the way down, so
+               the flank keeps no edge of its own. A deep mound is dimmer
+               than a high one — that, and nothing else, is the depth. */
+            var f = clamp((H * 0.90 - rk.top) / (H * 0.26), 0.2, 1);
+            var rimG = g.createLinearGradient(0, rk.top - 2, 0, rk.top + rk.ry * 0.5);
+            rimG.addColorStop(0, 'rgba(' + sn.rim + ',' + (0.72 * f).toFixed(3) + ')');
+            rimG.addColorStop(0.45, 'rgba(' + sn.rim + ',' + (0.22 * f).toFixed(3) + ')');
+            rimG.addColorStop(1, 'rgba(' + sn.rim + ',0)');
+            g.fillStyle = rimG;
+            g.beginPath();
+            g.ellipse(rk.cx, rk.cy, rk.rx, rk.ry, 0, 0, TAU);
+            g.fill();
+            var bodyG = g.createLinearGradient(0, H * 0.56, 0, H * 0.92);
+            bodyG.addColorStop(0, sn.hi);
+            bodyG.addColorStop(0.62, sn.mid);
+            bodyG.addColorStop(1, sn.lo);
+            g.fillStyle = bodyG;
+            g.beginPath();
+            g.ellipse(rk.cx, rk.cy + rimW, rk.rx, rk.ry, 0, 0, TAU);
+            g.fill();
+          }
           g.restore();
-          // and what little light falls this far down, gathering on the
-          // higher stones
+          // the streambed itself, laid over the buried half of every mound
+          g.beginPath();
+          g.moveTo(0, H + 2);
+          for (k2 = 0; k2 <= W; k2 += step) g.lineTo(k2, bedY(k2));
+          g.lineTo(W, bedY(W));
+          g.lineTo(W, H + 2);
+          g.closePath();
+          var bedG = g.createLinearGradient(0, H * 0.56, 0, H);
+          bedG.addColorStop(0, 'rgb(14,22,32)');
+          bedG.addColorStop(0.62, 'rgb(8,14,21)');
+          bedG.addColorStop(1, 'rgb(5,9,14)');
+          g.fillStyle = bedG;
+          g.fill();
+          // and what light falls this far down, gathering on the higher
+          // stones without ever washing the colour back out of them
           rockPath(g, W, H);
-          var lit = g.createLinearGradient(0, H * 0.6, 0, H * 0.98);
-          lit.addColorStop(0, 'rgba(64,90,118,0.13)');
-          lit.addColorStop(1, 'rgba(64,90,118,0)');
+          var lit = g.createLinearGradient(0, H * 0.58, 0, H * 0.98);
+          lit.addColorStop(0, 'rgba(92,126,162,0.07)');
+          lit.addColorStop(1, 'rgba(92,126,162,0)');
           g.fillStyle = lit;
           g.fill();
         });
@@ -3989,15 +4068,15 @@
         var busy = ents.length > 0 || live > 0 || poolVol > 0.5 || runVol > 0.5;
         if (busy) idle = 0; else idle += dt;
         ctx.globalCompositeOperation = 'source-over';
-        drawBackdrop(ctx, bg, w, h, first ? 1 : Math.min(1, 0.26 + idle * 1.2), 'rgb(12,19,28)');
+        drawBackdrop(ctx, bg, w, h, first ? 1 : Math.min(1, 0.26 + idle * 1.2), 'rgb(18,28,41)');
         first = false;
 
         // scenery in motion: light sliding over the wet bed, breathing slowly
         ctx.lineWidth = 1.4 * lw;
         for (i = 0; i < 3; i++) {
           var gx = w * (0.5 + 0.3 * Math.sin(t * 0.09 + i * 1.4));
-          ctx.strokeStyle = 'rgba(150,200,240,' +
-            (0.017 + 0.028 * Math.abs(Math.sin(t * 0.33 + i * 1.1))) + ')';
+          ctx.strokeStyle = 'rgba(166,212,248,' +
+            (0.024 + 0.038 * Math.abs(Math.sin(t * 0.33 + i * 1.1))) + ')';
           ctx.beginPath();
           ctx.moveTo(gx - w * 0.24, bedY(gx) + (i + 1) * 3.4 * lw);
           ctx.lineTo(gx + w * 0.24, bedY(gx) + (i + 1) * 3.4 * lw);
@@ -4231,27 +4310,39 @@
         stepWater(dt);
 
         /* ---- stone the water has touched --------------------------
-           A wetted flank goes dark and keeps a thin gloss along its
-           edge, and dries from the rim inward once the water is gone.
+           A wetted flank goes dark and richer at once — that is what wet
+           rock does, and it is why a stream reads as wet at all — keeps a
+           thin gloss along its edge, and dries from the rim inward once
+           the water is gone. Walked once per kind of stone, so each
+           flank deepens into its own colour rather than into soot.
            Only the stone above the waterline: what is under the pool is
            already darkened by the water lying on it. */
         if (wetAny) {
           var dry = 0.3 * lw;   // submerged stone is darkened by the pool itself
-          ctx.beginPath();
-          i = 0;
-          while (i < COLS) {
-            if (wet[i] <= 0.04 || dep[i] > dry) { i++; continue; }
-            a = i;
-            while (i < COLS && wet[i] > 0.04 && dep[i] <= dry) i++;
-            b = i - 1;
-            ctx.moveTo(a * colW, fl[a]);
-            for (k = a; k <= b; k++) ctx.lineTo((k + 0.5) * colW, fl[k]);
-            ctx.lineTo((b + 1) * colW, fl[b]);
-            for (k = b; k >= a; k--) ctx.lineTo((k + 0.5) * colW, fl[k] + wet[k] * 7 * lw);
-            ctx.closePath();
+          for (var hq = 0; hq < 3; hq++) {
+            any = false;
+            ctx.beginPath();
+            i = 0;
+            while (i < COLS) {
+              if (colHue[i] !== hq || wet[i] <= 0.04 || dep[i] > dry) { i++; continue; }
+              a = i;
+              while (i < COLS && colHue[i] === hq && wet[i] > 0.04 && dep[i] <= dry) i++;
+              b = i - 1;
+              ctx.moveTo(a * colW, fl[a]);
+              for (k = a; k <= b; k++) ctx.lineTo((k + 0.5) * colW, fl[k]);
+              ctx.lineTo((b + 1) * colW, fl[b]);
+              for (k = b; k >= a; k--) ctx.lineTo((k + 0.5) * colW, fl[k] + wet[k] * 7 * lw);
+              ctx.closePath();
+              any = true;
+            }
+            if (!any) continue;
+            ctx.fillStyle = WET_D[hq];
+            ctx.fill();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = WET_R[hq];
+            ctx.fill();
+            ctx.globalCompositeOperation = 'source-over';
           }
-          ctx.fillStyle = 'rgba(3,7,12,0.42)';
-          ctx.fill();
         }
 
         // ---- standing water ------------------------------------------
@@ -4260,11 +4351,37 @@
         // what makes the mounds read as islands rather than as a flood.
         if (poolVol > 0.5) {
           poolPath(ctx, 0, 0);
-          ctx.fillStyle = 'rgba(6,13,22,0.22)';   // water darkens the stone
+          ctx.fillStyle = 'rgba(6,14,24,0.21)';   // water darkens the stone
           ctx.fill();
           ctx.globalCompositeOperation = 'lighter';
-          ctx.fillStyle = 'rgba(28,70,120,0.042)'; // and the depths keep no light
+          ctx.fillStyle = 'rgba(38,92,150,0.062)'; // and the depths keep little light
           ctx.fill();
+          /* a crown that has drowned still shows what stone it is: its
+             colour comes up through the water lying over it, which is
+             the whole tell that something is down there at all */
+          for (var hs = 0; hs < 3; hs++) {
+            any = false;
+            ctx.beginPath();
+            i = 0;
+            while (i < COLS) {
+              if (colHue[i] !== hs || dep[i] <= 0.5 * lw || stoneUp[i] <= 3 * lw) { i++; continue; }
+              a = i;
+              while (i < COLS && colHue[i] === hs && dep[i] > 0.5 * lw && stoneUp[i] > 3 * lw) i++;
+              b = i - 1;
+              for (k = a; k <= b; k++) {
+                var ty = fl[k] - 1.2 * lw, sy2 = surfY(k);
+                if (ty < sy2) ty = sy2;
+                if (k === a) ctx.moveTo((k + 0.5) * colW, ty);
+                else ctx.lineTo((k + 0.5) * colW, ty);
+              }
+              for (k = b; k >= a; k--) ctx.lineTo((k + 0.5) * colW, fl[k] + 6 * lw);
+              ctx.closePath();
+              any = true;
+            }
+            if (!any) continue;
+            ctx.fillStyle = SUNK[hs];
+            ctx.fill();
+          }
         } else {
           ctx.globalCompositeOperation = 'lighter';
         }
@@ -4280,7 +4397,7 @@
             ctx.moveTo((a + 0.5) * colW, fl[a]);
             for (k = a + 1; k <= b; k++) ctx.lineTo((k + 0.5) * colW, fl[k]);
           }
-          ctx.strokeStyle = 'rgba(125,175,220,0.075)';
+          ctx.strokeStyle = 'rgba(164,208,244,0.115)';
           ctx.lineWidth = 1.6 * lw;
           ctx.stroke();
         }
@@ -4289,16 +4406,16 @@
           // the skin: bright shallows, the line where it meets the air,
           // and a sheen drifting slowly along it
           poolPath(ctx, 2, 0.55);   // the light reaches a little way down
-          ctx.fillStyle = 'rgba(40,96,156,0.062)';
+          ctx.fillStyle = 'rgba(54,124,190,0.088)';
           ctx.fill();
           poolPath(ctx, 2, 0.16);   // and gathers in the shallows
-          ctx.fillStyle = 'rgba(52,112,172,0.075)';
+          ctx.fillStyle = 'rgba(78,156,216,0.118)';
           ctx.fill();
           poolPath(ctx, 1, 0);
-          ctx.strokeStyle = 'rgba(150,205,245,0.17)';
+          ctx.strokeStyle = 'rgba(176,222,252,0.235)';
           ctx.lineWidth = 1.6 * lw;
           ctx.stroke();
-          ctx.strokeStyle = 'rgba(226,244,255,0.10)';
+          ctx.strokeStyle = 'rgba(238,250,255,0.115)';
           ctx.lineWidth = 0.7 * lw;
           ctx.stroke();
           any = false;
@@ -4312,7 +4429,7 @@
             any = true;
           }
           if (any) {
-            ctx.strokeStyle = 'rgba(140,195,240,0.06)';
+            ctx.strokeStyle = 'rgba(162,212,248,0.088)';
             ctx.lineWidth = 2 * lw;
             ctx.stroke();
           }
@@ -4340,17 +4457,17 @@
           var syy = rk.cy + Math.sin(sp.a) * rk.ry;
           // it has crept down into the bed: gone, and another starts elsewhere
           if (syy > bedY(sbx)) { sp.age = sp.life + 1; continue; }
-          var sa = 0.23 * Math.min(1, sp.age / 1.2, (sp.life - sp.age) / 1.5);
+          var sa = 0.30 * Math.min(1, sp.age / 1.2, (sp.life - sp.age) / 1.5);
           if (sa <= 0) continue;
           // the wet track it has left, taken from the very same curve the
           // bead is walking, so the streak lies exactly on the stone
           var back = sp.a - sp.dir * 0.16;
-          ctx.strokeStyle = 'rgba(140,195,240,' + sa * 0.45 + ')';
+          ctx.strokeStyle = 'rgba(158,208,246,' + sa * 0.45 + ')';
           ctx.beginPath();
           ctx.ellipse(rk.cx, rk.cy, rk.rx, rk.ry, 0,
                       sp.dir > 0 ? back : sp.a, sp.dir > 0 ? sp.a : back);
           ctx.stroke();
-          ctx.fillStyle = 'rgba(180,220,252,' + sa + ')';
+          ctx.fillStyle = 'rgba(200,234,255,' + sa + ')';
           ctx.beginPath();
           ctx.arc(sbx, syy, 1.4 * lw, 0, TAU);
           ctx.fill();
@@ -4363,14 +4480,14 @@
            never a file of beads. */
         if (runVol > 0.4) {
           filmPath(ctx, 2);
-          ctx.strokeStyle = 'rgba(44,102,168,0.068)';
+          ctx.strokeStyle = 'rgba(58,128,198,0.10)';
           ctx.lineWidth = 8 * lw;
           ctx.stroke();
           filmPath(ctx, 0);
-          ctx.fillStyle = 'rgba(58,124,192,0.13)';
+          ctx.fillStyle = 'rgba(76,152,220,0.185)';
           ctx.fill();
           filmPath(ctx, 1);
-          ctx.strokeStyle = 'rgba(178,220,252,0.105)';
+          ctx.strokeStyle = 'rgba(208,240,255,0.155)';
           ctx.lineWidth = 1.1 * lw;
           ctx.stroke();
         }
@@ -4414,7 +4531,7 @@
           any = true;
         }
         if (any) {
-          ctx.fillStyle = 'rgba(46,110,180,0.06)';
+          ctx.fillStyle = 'rgba(64,140,210,0.086)';
           ctx.fill();
           ctx.beginPath();
           for (i = 0; i < ents.length; i++) {
@@ -4423,7 +4540,7 @@
             ctx.moveTo(e.mx + (0.8 + 1.3 * e.ma) * lw, e.my);
             ctx.arc(e.mx, e.my, (0.8 + 1.3 * e.ma) * lw, 0, TAU);
           }
-          ctx.fillStyle = 'rgba(226,246,255,0.15)';
+          ctx.fillStyle = 'rgba(238,251,255,0.20)';
           ctx.fill();
         }
 
@@ -4442,10 +4559,10 @@
           }
           if (!any) continue;
           var big = tr > 2, fb = tr % 3;
-          ctx.strokeStyle = 'rgba(105,180,240,' + GLOW_A[fb] * (big ? 1.45 : 1) + ')';
+          ctx.strokeStyle = 'rgba(126,196,246,' + GLOW_A[fb] * (big ? 1.45 : 1) + ')';
           ctx.lineWidth = (big ? 5.4 : 3) * lw;
           ctx.stroke();
-          ctx.strokeStyle = 'rgba(222,244,255,' + CORE_A[fb] * (big ? 1.1 : 1) + ')';
+          ctx.strokeStyle = 'rgba(234,250,255,' + CORE_A[fb] * (big ? 1.1 : 1) + ')';
           ctx.lineWidth = (big ? 1.7 : 1) * lw;
           ctx.stroke();
         }
@@ -4458,7 +4575,7 @@
           if (s.age >= s.life) { s.on = false; continue; }
           var sf2 = s.age / s.life;
           var sr = (3 + 26 * sf2) * lw * (0.4 + 0.8 * s.p);
-          ctx.strokeStyle = 'rgba(120,190,240,' + 0.19 * (1 - sf2) * (1 - sf2) * s.p + ')';
+          ctx.strokeStyle = 'rgba(146,208,248,' + 0.26 * (1 - sf2) * (1 - sf2) * s.p + ')';
           ctx.lineWidth = 1.1 * lw;
           ctx.beginPath();
           ctx.ellipse(s.x, s.y, sr, sr * 0.18, 0, 0, TAU);
