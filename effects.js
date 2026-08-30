@@ -2371,6 +2371,754 @@
     };
   }
 
+/* ------------------------------------------------------------------
+     10. Ink Eddy — the screen is a still, dark pond of invisible water.
+        A gesture injects glowing ink AND momentum into a real PIC/FLIP
+        fluid: the dam_builder water core with gravity, terrain and the
+        free surface taken out, only the banks left as solids, and a
+        gentle global damping added so the pond always forgets. Nothing
+        below draws a spiral — the curls, the ribbons rolling up along
+        their own shear and the mushrooming jets are simply what
+        incompressible flow does with the impulse it was handed. Only
+        the ink is drawn; the carrier lattice that does the physics is
+        invisible, and when the last ink dies and the water goes still
+        the whole simulation sleeps.
+  ------------------------------------------------------------------ */
+  function inkEddy() {
+    var AIR = 0, FLUID = 1, SOLID = 2;
+
+    /* transplanted unchanged from dam_builder's water — these numbers
+       encode a lot of real debugging and are not worth re-deriving */
+    var FLIP = 0.9;       // PIC/FLIP blend (1 = pure FLIP: lively but noisy)
+    var SOR = 1.6;        // over-relaxation on the Gauss-Seidel pressure solve
+    var SEP = 0.95;       // push-apart rest distance, in lattice pitches
+    var SEP_IT = 2;
+    var DRIFT = 0.02;     // density-drift compensation: stops slow compression
+    var MOVE_FRAC = 0.5;  // max advection per substep, in particle radii (CFL)
+    var MAX_SUB = 6;
+    /* and the adaptations: no gravity, no hydrostatic ramp to converge, so
+       the warm start carries a much shorter solve */
+    var P_ITERS = 18;
+    var WALL_KEEP = 0.86; // tangential velocity kept at the banks
+    var R_FRAC = 0.46;    // particle radius / lattice pitch
+    var DAMP = 0.45;      // 1/s: the pond settles back to glass in a few seconds
+    var VMAX = 1200;      // px/s explosion guard
+    var SLEEP_V = 3;      // px/s: below this, with no ink left, the sim stops
+    var LO_PEAK = 1.6487; // e^0.5 — a Lamb-Oseen swirl has w(0) = spin*e^0.5/sigma
+
+    var f = null, bg = null, first = true, asleep = true;
+    var motes = [];
+    var holding = false, holdSig = 30, holdX = 0, holdY = 0;
+    var spinDir = 1, inkAcc = 0;
+
+    // ink: passive tracers, the only thing that is ever drawn
+    var kcap = 0, kn = 0, kcur = 0;
+    var kx = null, ky = null, kpx = null, kpy = null;  // head, and streak tail
+    var kage = null, klife = null, ktier = null, kang = null;
+
+    /* five luminance bands, so the whole cloud draws in five batched strokes.
+       The ink is deliberately over-populated and drawn faint: a few hundred
+       bright specks read as confetti, a few thousand dim ones read as dye. */
+    var INK = ['rgba(108,128,178,', 'rgba(138,166,214,', 'rgba(178,200,240,',
+               'rgba(214,230,252,', 'rgba(242,248,255,'];
+    var INK_A = [0.030, 0.052, 0.085, 0.125, 0.180];
+    var FIBRE = 3.4; // px: every tracer lies as a short thread, never a bead
+
+    /* ---- the fluid: a MAC grid plus an invisible carrier lattice ------
+       Index conventions, column-major, exactly as in the original:
+         cell  c = ix*ny + iy
+         u face  = ix*ny + iy         (vertical faces,  ix in [0,nx])
+         v face  = ix*(ny+1) + iy     (horizontal faces, iy in [0,ny])   */
+
+    function makeFluid(W, H) {
+      var s = clamp(Math.sqrt((W * H) / 2400), 9, 18); // lattice pitch, px
+      var gh = s * 1.5;                                // cell size, px
+      var nx = Math.ceil(W / gh) + 2;                  // +2: one solid border
+      var ny = Math.ceil(H / gh) + 2;                  //     cell all the way round
+      var nc = nx * ny;
+      var iw = (nx - 2) * gh, ih = (ny - 2) * gh;      // the wet interior, from 0
+      var cols = Math.max(2, Math.round(iw / s));
+      var rows = Math.max(2, Math.round(ih / s));
+      var n = cols * rows;
+      var o = {
+        h: gh, invH: 1 / gh, x0: -gh, y0: -gh, nx: nx, ny: ny, nc: nc,
+        iw: iw, ih: ih, s: s, radius: s * R_FRAC,
+        restDens: (gh * gh) / (s * s),
+        n: n,
+        px: new Float32Array(n), py: new Float32Array(n),
+        vx: new Float32Array(n), vy: new Float32Array(n),
+        u: new Float32Array((nx + 1) * ny), uPre: new Float32Array((nx + 1) * ny),
+        uw: new Float32Array((nx + 1) * ny), uOk: new Uint8Array((nx + 1) * ny),
+        v: new Float32Array(nx * (ny + 1)), vPre: new Float32Array(nx * (ny + 1)),
+        vw: new Float32Array(nx * (ny + 1)), vOk: new Uint8Array(nx * (ny + 1)),
+        p: new Float32Array(nc),          // PERSISTS between frames (warm start)
+        div: new Float32Array(nc), dens: new Float32Array(nc),
+        type: new Uint8Array(nc), solid: new Uint8Array(nc), kcnt: new Uint8Array(nc),
+        list: new Int32Array(nc), fcount: 0, air: 0,
+        binStart: new Int32Array(nc + 1), binIdx: new Int32Array(n),
+        binCur: new Int32Array(nc),
+        maxSpeed: 0
+      };
+      var i, j;
+      for (i = 0; i < nx; i++) {
+        for (j = 0; j < ny; j++) {
+          o.solid[i * ny + j] = (i === 0 || i === nx - 1 || j === 0 || j === ny - 1) ? 1 : 0;
+        }
+      }
+      // the carrier lattice fills the interior exactly: pitch is also the
+      // push-apart rest distance, so the pond starts already relaxed
+      var sx = iw / cols, sy = ih / rows, k = 0;
+      for (i = 0; i < cols; i++) {
+        for (j = 0; j < rows; j++) {
+          o.px[k] = (i + 0.5) * sx + rand(-0.04, 0.04) * s;
+          o.py[k] = (j + 0.5) * sy + rand(-0.04, 0.04) * s;
+          k++;
+        }
+      }
+      return o;
+    }
+
+    function stillness(o) {
+      o.vx.fill(0); o.vy.fill(0);
+      o.u.fill(0); o.v.fill(0); o.uPre.fill(0); o.vPre.fill(0);
+      o.p.fill(0);
+      o.maxSpeed = 0;
+    }
+
+    /* A gesture is a paddle. Inside a Gaussian patch the water is blended
+       toward a target motion — a Lamb-Oseen swirl of peak tangential speed
+       `spin`, plus a uniform push (ax, ay) — with `k` how hard it bites.
+       Blending toward a target rather than adding impulses is what keeps a
+       long hold from winding itself into a runaway. */
+    function stir(o, cx, cy, sig, spin, ax, ay, k) {
+      var n = o.n, invS2 = 1 / (sig * sig), reach = sig * 2.6;
+      var r2 = reach * reach;
+      for (var i = 0; i < n; i++) {
+        var dx = o.px[i] - cx, dy = o.py[i] - cy;
+        var d2 = dx * dx + dy * dy;
+        if (d2 > r2) continue;
+        var q2 = d2 * invS2;                       // (d/sig)^2
+        // the push is a plain Gaussian blob: incompressibility turns it into a
+        // vortex ring by itself, which is where the mushroom comes from
+        var gp = Math.exp(-0.5 * q2) * k;
+        var vx = ax * gp, vy = ay * gp;
+        if (spin !== 0 && d2 > 1e-6) {
+          /* the swirl gets a FLAT-TOPPED weight instead of that Gaussian.
+             Multiplying a Lamb-Oseen profile by a Gaussian falloff squeezes
+             the eddy into a thin ring and roughly halves how fast it turns —
+             the vortex then never visibly winds the dye at all, which is the
+             one thing this effect exists to show. */
+          var q6 = q2 * q2 * q2;
+          var gs = Math.exp(-q6 / 16.44) * k;      // ~1 out to q=1.2, gone by 2.2
+          var d = Math.sqrt(d2), q = d / sig;
+          var tg = spin * q * Math.exp(0.5 - 0.5 * q2) * gs;
+          vx -= dy / d * tg;
+          vy += dx / d * tg;
+          o.vx[i] += vx - o.vx[i] * Math.max(gp, gs);
+          o.vy[i] += vy - o.vy[i] * Math.max(gp, gs);
+          continue;
+        }
+        o.vx[i] += vx - o.vx[i] * gp;
+        o.vy[i] += vy - o.vy[i] * gp;
+      }
+    }
+
+    function step(o, dt) {
+      var n = o.n, i;
+      // CFL: never advect more than a fraction of a particle radius per substep
+      var vmax = 0;
+      for (i = 0; i < n; i++) {
+        var sp = Math.abs(o.vx[i]) + Math.abs(o.vy[i]);
+        if (sp > vmax) vmax = sp;
+      }
+      o.maxSpeed = vmax;
+      var sub = Math.ceil((vmax * dt) / Math.max(1e-3, MOVE_FRAC * o.radius));
+      if (sub < 1) sub = 1; else if (sub > MAX_SUB) sub = MAX_SUB;
+      var hs = dt / sub, dmp = Math.exp(-DAMP * hs);
+      for (i = 0; i < sub; i++) { integrate(o, hs, dmp); collide(o); }
+      bins(o);
+      for (i = 0; i < SEP_IT; i++) pushApart(o);
+      collide(o);
+      p2g(o);
+      classify(o);
+      solve(o, dt);
+      g2p(o);
+    }
+
+    function integrate(o, dt, dmp) {
+      var n = o.n, px = o.px, py = o.py, vx = o.vx, vy = o.vy;
+      for (var i = 0; i < n; i++) {
+        var ux = vx[i] * dmp, uy = vy[i] * dmp;
+        var sp = Math.abs(ux) + Math.abs(uy);
+        if (sp > VMAX) { var k = VMAX / sp; ux *= k; uy *= k; }
+        vx[i] = ux; vy[i] = uy;
+        px[i] += ux * dt;
+        py[i] += uy * dt;
+      }
+    }
+
+    // the banks: the only solids left in the port
+    function collide(o) {
+      var n = o.n, r = o.radius, keep = WALL_KEEP;
+      var hiX = o.iw - r, hiY = o.ih - r;
+      var px = o.px, py = o.py, vx = o.vx, vy = o.vy;
+      for (var i = 0; i < n; i++) {
+        var x = px[i], y = py[i];
+        if (x < r) { x = r; if (vx[i] < 0) { vx[i] = 0; vy[i] *= keep; } }
+        else if (x > hiX) { x = hiX; if (vx[i] > 0) { vx[i] = 0; vy[i] *= keep; } }
+        if (y < r) { y = r; if (vy[i] < 0) { vy[i] = 0; vx[i] *= keep; } }
+        else if (y > hiY) { y = hiY; if (vy[i] > 0) { vy[i] = 0; vx[i] *= keep; } }
+        px[i] = x; py[i] = y;
+      }
+    }
+
+    // counting sort into cells: no allocation, no hashing
+    function bins(o) {
+      var n = o.n, nc = o.nc, ny = o.ny, nx = o.nx;
+      var start = o.binStart, idx = o.binIdx, cur = o.binCur, c, i, ix, iy;
+      start.fill(0);
+      for (i = 0; i < n; i++) {
+        ix = Math.floor((o.px[i] - o.x0) * o.invH);
+        iy = Math.floor((o.py[i] - o.y0) * o.invH);
+        if (ix < 0) ix = 0; else if (ix > nx - 1) ix = nx - 1;
+        if (iy < 0) iy = 0; else if (iy > ny - 1) iy = ny - 1;
+        start[ix * ny + iy + 1]++;
+      }
+      for (c = 0; c < nc; c++) start[c + 1] += start[c];
+      for (c = 0; c < nc; c++) cur[c] = start[c];
+      for (i = 0; i < n; i++) {
+        ix = Math.floor((o.px[i] - o.x0) * o.invH);
+        iy = Math.floor((o.py[i] - o.y0) * o.invH);
+        if (ix < 0) ix = 0; else if (ix > nx - 1) ix = nx - 1;
+        if (iy < 0) iy = 0; else if (iy > ny - 1) iy = ny - 1;
+        idx[cur[ix * ny + iy]++] = i;
+      }
+    }
+
+    // keeps the lattice from clumping, which is what the pressure solve
+    // would otherwise fight with big, boiling corrections
+    function pushApart(o) {
+      var n = o.n, minD = o.s * SEP, minD2 = minD * minD;
+      var px = o.px, py = o.py, start = o.binStart, idx = o.binIdx;
+      var nx = o.nx, ny = o.ny;
+      for (var i = 0; i < n; i++) {
+        var ix = Math.floor((px[i] - o.x0) * o.invH);
+        var iy = Math.floor((py[i] - o.y0) * o.invH);
+        if (ix < 0) ix = 0; else if (ix > nx - 1) ix = nx - 1;
+        if (iy < 0) iy = 0; else if (iy > ny - 1) iy = ny - 1;
+        var xa = ix > 0 ? ix - 1 : 0, xb = ix < nx - 1 ? ix + 1 : nx - 1;
+        var ya = iy > 0 ? iy - 1 : 0, yb = iy < ny - 1 ? iy + 1 : ny - 1;
+        for (var cx = xa; cx <= xb; cx++) {
+          for (var cy = ya; cy <= yb; cy++) {
+            var c = cx * ny + cy;
+            for (var k = start[c], e = start[c + 1]; k < e; k++) {
+              var j = idx[k];
+              if (j === i) continue;
+              var dx = px[j] - px[i], dy = py[j] - py[i];
+              var d2 = dx * dx + dy * dy;
+              if (d2 > minD2 || d2 < 1e-12) continue;
+              var d = Math.sqrt(d2), sc = (0.5 * (minD - d)) / d;
+              dx *= sc; dy *= sc;
+              px[i] -= dx; py[i] -= dy;
+              px[j] += dx; py[j] += dy;
+            }
+          }
+        }
+      }
+    }
+
+    function p2g(o) {
+      var n = o.n, nx = o.nx, ny = o.ny, invH = o.invH, i;
+      o.u.fill(0); o.uw.fill(0); o.v.fill(0); o.vw.fill(0); o.dens.fill(0);
+      for (i = 0; i < n; i++) {
+        var gx = (o.px[i] - o.x0) * invH, gy = (o.py[i] - o.y0) * invH;
+        var fx, fy, i0, j0, tx, ty, a, b, w00, w10, w01, w11, val;
+        // u faces, sampled at (gx, gy-0.5)
+        fx = gx; fy = gy - 0.5;
+        i0 = Math.floor(fx); j0 = Math.floor(fy);
+        if (i0 < 0) i0 = 0; else if (i0 > nx - 1) i0 = nx - 1;
+        if (j0 < 0) j0 = 0; else if (j0 > ny - 2) j0 = ny - 2;
+        tx = fx - i0; ty = fy - j0;
+        w00 = (1 - tx) * (1 - ty); w10 = tx * (1 - ty);
+        w01 = (1 - tx) * ty; w11 = tx * ty;
+        a = i0 * ny + j0; b = a + ny;
+        val = o.vx[i];
+        o.u[a] += val * w00; o.uw[a] += w00;
+        o.u[b] += val * w10; o.uw[b] += w10;
+        o.u[a + 1] += val * w01; o.uw[a + 1] += w01;
+        o.u[b + 1] += val * w11; o.uw[b + 1] += w11;
+        // v faces, sampled at (gx-0.5, gy)
+        fx = gx - 0.5; fy = gy;
+        i0 = Math.floor(fx); j0 = Math.floor(fy);
+        if (i0 < 0) i0 = 0; else if (i0 > nx - 2) i0 = nx - 2;
+        if (j0 < 0) j0 = 0; else if (j0 > ny - 1) j0 = ny - 1;
+        tx = fx - i0; ty = fy - j0;
+        w00 = (1 - tx) * (1 - ty); w10 = tx * (1 - ty);
+        w01 = (1 - tx) * ty; w11 = tx * ty;
+        a = i0 * (ny + 1) + j0; b = a + (ny + 1);
+        val = o.vy[i];
+        o.v[a] += val * w00; o.vw[a] += w00;
+        o.v[b] += val * w10; o.vw[b] += w10;
+        o.v[a + 1] += val * w01; o.vw[a + 1] += w01;
+        o.v[b + 1] += val * w11; o.vw[b + 1] += w11;
+        // cell density: weights sum to 1 per particle
+        fx = gx - 0.5; fy = gy - 0.5;
+        i0 = Math.floor(fx); j0 = Math.floor(fy);
+        if (i0 < 0) i0 = 0; else if (i0 > nx - 2) i0 = nx - 2;
+        if (j0 < 0) j0 = 0; else if (j0 > ny - 2) j0 = ny - 2;
+        tx = fx - i0; ty = fy - j0;
+        a = i0 * ny + j0; b = a + ny;
+        o.dens[a] += (1 - tx) * (1 - ty);
+        o.dens[b] += tx * (1 - ty);
+        o.dens[a + 1] += (1 - tx) * ty;
+        o.dens[b + 1] += tx * ty;
+      }
+      var un = o.u.length, vn = o.v.length;
+      for (i = 0; i < un; i++) if (o.uw[i] > 0) o.u[i] /= o.uw[i];
+      for (i = 0; i < vn; i++) if (o.vw[i] > 0) o.v[i] /= o.vw[i];
+      o.uPre.set(o.u);
+      o.vPre.set(o.v);
+    }
+
+    function classify(o) {
+      var nx = o.nx, ny = o.ny, t = o.type, n = o.n, c, i, j;
+      for (c = 0; c < o.nc; c++) t[c] = o.solid[c] ? SOLID : AIR;
+      for (i = 0; i < n; i++) {
+        var ix = Math.floor((o.px[i] - o.x0) * o.invH);
+        var iy = Math.floor((o.py[i] - o.y0) * o.invH);
+        if (ix < 0) ix = 0; else if (ix > nx - 1) ix = nx - 1;
+        if (iy < 0) iy = 0; else if (iy > ny - 1) iy = ny - 1;
+        c = ix * ny + iy;
+        if (t[c] === AIR) t[c] = FLUID;
+      }
+      var fc = 0, air = 0;
+      for (i = 1; i < nx - 1; i++) {
+        var base = i * ny;
+        for (j = 1; j < ny - 1; j++) {
+          c = base + j;
+          if (t[c] !== FLUID) { o.p[c] = 0; air++; continue; }
+          var k = 0;
+          if (t[c - ny] !== SOLID) k++;
+          if (t[c + ny] !== SOLID) k++;
+          if (t[c - 1] !== SOLID) k++;
+          if (t[c + 1] !== SOLID) k++;
+          o.kcnt[c] = k;
+          if (k === 0) { o.p[c] = 0; continue; }
+          o.list[fc++] = c;
+        }
+      }
+      o.fcount = fc;
+      o.air = air;
+    }
+
+    // warm-started Gauss-Seidel (SOR) pressure Poisson, then projection
+    function solve(o, dt) {
+      var nx = o.nx, ny = o.ny, gh = o.h;
+      var t = o.type, u = o.u, v = o.v, p = o.p, div = o.div;
+      var list = o.list, fc = o.fcount;
+      var i, c, ix, iy, base, iu, iv;
+      // no-flux: solid faces carry no flow
+      for (ix = 0; ix < nx; ix++) {
+        base = ix * ny;
+        for (iy = 0; iy < ny; iy++) {
+          c = base + iy;
+          if (t[c] !== SOLID) continue;
+          u[base + iy] = 0;
+          u[base + ny + iy] = 0;
+          v[ix * (ny + 1) + iy] = 0;
+          v[ix * (ny + 1) + iy + 1] = 0;
+        }
+      }
+      var hdt = gh / dt;
+      for (i = 0; i < fc; i++) {
+        c = list[i];
+        ix = (c / ny) | 0; iy = c - ix * ny;
+        iu = c; iv = ix * (ny + 1) + iy;
+        var D = u[iu + ny] - u[iu] + v[iv + 1] - v[iv];
+        var comp = o.dens[c] / o.restDens - 1;
+        if (comp > 0) D -= DRIFT * comp * hdt;
+        div[c] = D * hdt;
+      }
+      for (var it = 0; it < P_ITERS; it++) {
+        for (i = 0; i < fc; i++) {
+          c = list[i];
+          var sum = 0;
+          if (t[c - ny] !== SOLID) sum += p[c - ny];
+          if (t[c + ny] !== SOLID) sum += p[c + ny];
+          if (t[c - 1] !== SOLID) sum += p[c - 1];
+          if (t[c + 1] !== SOLID) sum += p[c + 1];
+          p[c] += SOR * ((sum - div[c]) / o.kcnt[c] - p[c]);
+        }
+      }
+      /* A closed pond has no free surface, so unlike the dam the Poisson
+         problem here is all-Neumann: pressure is only fixed up to a constant,
+         and warm-started sweeps would let that constant walk off to infinity
+         and eat the float32 precision the gradients live in. The gradient is
+         what we project with and it is untouched by a constant, so simply
+         re-center the field. Skipped whenever a cell has gone empty: such a
+         cell is a p=0 anchor that must not be shifted. */
+      if (o.air === 0 && fc > 0) {
+        var mean = 0;
+        for (i = 0; i < fc; i++) mean += p[list[i]];
+        mean /= fc;
+        for (i = 0; i < fc; i++) p[list[i]] -= mean;
+      }
+      // project: every face with a fluid side, exactly once
+      var scale = dt / gh;
+      for (i = 0; i < fc; i++) {
+        c = list[i];
+        ix = (c / ny) | 0; iy = c - ix * ny;
+        iu = c; iv = ix * (ny + 1) + iy;
+        var pc = p[c];
+        var tl = t[c - ny], tr = t[c + ny], tb = t[c - 1], tt = t[c + 1];
+        if (tl !== SOLID) u[iu] -= scale * (pc - (tl === FLUID ? p[c - ny] : 0));
+        if (tb !== SOLID) v[iv] -= scale * (pc - (tb === FLUID ? p[c - 1] : 0));
+        if (tr === AIR) u[iu + ny] -= scale * (0 - pc);
+        if (tt === AIR) v[iv + 1] -= scale * (0 - pc);
+      }
+    }
+
+    function g2p(o) {
+      var n = o.n, nx = o.nx, ny = o.ny, invH = o.invH, t = o.type;
+      var ix, iy, idx, i;
+      // a face is usable if one of its two cells holds fluid
+      for (ix = 0; ix <= nx; ix++) {
+        for (iy = 0; iy < ny; iy++) {
+          idx = ix * ny + iy;
+          var l = ix > 0 ? t[(ix - 1) * ny + iy] : SOLID;
+          var r = ix < nx ? t[ix * ny + iy] : SOLID;
+          o.uOk[idx] = (l === FLUID || r === FLUID) ? 1 : 0;
+        }
+      }
+      for (ix = 0; ix < nx; ix++) {
+        for (iy = 0; iy <= ny; iy++) {
+          idx = ix * (ny + 1) + iy;
+          var bb = iy > 0 ? t[ix * ny + iy - 1] : SOLID;
+          var aa = iy < ny ? t[ix * ny + iy] : SOLID;
+          o.vOk[idx] = (aa === FLUID || bb === FLUID) ? 1 : 0;
+        }
+      }
+      var pic = 1 - FLIP;
+      for (i = 0; i < n; i++) {
+        var gx = (o.px[i] - o.x0) * invH, gy = (o.py[i] - o.y0) * invH;
+        var fx, fy, i0, j0, tx, ty, a, b, w0, w1, w2, w3, v0, v1, v2, v3, ws, cur, old;
+        fx = gx; fy = gy - 0.5;
+        i0 = Math.floor(fx); j0 = Math.floor(fy);
+        if (i0 < 0) i0 = 0; else if (i0 > nx - 1) i0 = nx - 1;
+        if (j0 < 0) j0 = 0; else if (j0 > ny - 2) j0 = ny - 2;
+        tx = fx - i0; ty = fy - j0;
+        a = i0 * ny + j0; b = a + ny;
+        w0 = (1 - tx) * (1 - ty); w1 = tx * (1 - ty); w2 = (1 - tx) * ty; w3 = tx * ty;
+        v0 = o.uOk[a]; v1 = o.uOk[b]; v2 = o.uOk[a + 1]; v3 = o.uOk[b + 1];
+        ws = v0 * w0 + v1 * w1 + v2 * w2 + v3 * w3;
+        if (ws > 0) {
+          cur = (v0 * w0 * o.u[a] + v1 * w1 * o.u[b] + v2 * w2 * o.u[a + 1] + v3 * w3 * o.u[b + 1]) / ws;
+          old = (v0 * w0 * o.uPre[a] + v1 * w1 * o.uPre[b] + v2 * w2 * o.uPre[a + 1] + v3 * w3 * o.uPre[b + 1]) / ws;
+          o.vx[i] = pic * cur + FLIP * (o.vx[i] + cur - old);
+        }
+        fx = gx - 0.5; fy = gy;
+        i0 = Math.floor(fx); j0 = Math.floor(fy);
+        if (i0 < 0) i0 = 0; else if (i0 > nx - 2) i0 = nx - 2;
+        if (j0 < 0) j0 = 0; else if (j0 > ny - 1) j0 = ny - 1;
+        tx = fx - i0; ty = fy - j0;
+        a = i0 * (ny + 1) + j0; b = a + (ny + 1);
+        w0 = (1 - tx) * (1 - ty); w1 = tx * (1 - ty); w2 = (1 - tx) * ty; w3 = tx * ty;
+        v0 = o.vOk[a]; v1 = o.vOk[b]; v2 = o.vOk[a + 1]; v3 = o.vOk[b + 1];
+        ws = v0 * w0 + v1 * w1 + v2 * w2 + v3 * w3;
+        if (ws > 0) {
+          cur = (v0 * w0 * o.v[a] + v1 * w1 * o.v[b] + v2 * w2 * o.v[a + 1] + v3 * w3 * o.v[b + 1]) / ws;
+          old = (v0 * w0 * o.vPre[a] + v1 * w1 * o.vPre[b] + v2 * w2 * o.vPre[a + 1] + v3 * w3 * o.vPre[b + 1]) / ws;
+          o.vy[i] = pic * cur + FLIP * (o.vy[i] + cur - old);
+        }
+      }
+    }
+
+    function sampleU(o, x, y) {
+      var nx = o.nx, ny = o.ny;
+      var fx = (x - o.x0) * o.invH, fy = (y - o.y0) * o.invH - 0.5;
+      var i0 = Math.floor(fx), j0 = Math.floor(fy);
+      if (i0 < 0) i0 = 0; else if (i0 > nx - 1) i0 = nx - 1;
+      if (j0 < 0) j0 = 0; else if (j0 > ny - 2) j0 = ny - 2;
+      var tx = fx - i0, ty = fy - j0, a = i0 * ny + j0, b = a + ny;
+      return (1 - tx) * (1 - ty) * o.u[a] + tx * (1 - ty) * o.u[b] +
+             (1 - tx) * ty * o.u[a + 1] + tx * ty * o.u[b + 1];
+    }
+
+    function sampleV(o, x, y) {
+      var nx = o.nx, ny = o.ny;
+      var fx = (x - o.x0) * o.invH - 0.5, fy = (y - o.y0) * o.invH;
+      var i0 = Math.floor(fx), j0 = Math.floor(fy);
+      if (i0 < 0) i0 = 0; else if (i0 > nx - 2) i0 = nx - 2;
+      if (j0 < 0) j0 = 0; else if (j0 > ny - 1) j0 = ny - 1;
+      var tx = fx - i0, ty = fy - j0, a = i0 * (ny + 1) + j0, b = a + (ny + 1);
+      return (1 - tx) * (1 - ty) * o.v[a] + tx * (1 - ty) * o.v[b] +
+             (1 - tx) * ty * o.v[a + 1] + tx * ty * o.v[b + 1];
+    }
+
+    // ---- ink ----------------------------------------------------------
+
+    function addInk(x, y, life) {
+      var j;
+      if (kn < kcap) j = kn++;
+      else { j = kcur++; if (kcur >= kcap) kcur = 0; } // recycle round-robin
+      var a = rand(0, TAU);
+      kx[j] = x; ky[j] = y;
+      kpx[j] = x - Math.cos(a) * FIBRE; kpy[j] = y - Math.sin(a) * FIBRE;
+      kage[j] = 0; klife[j] = life;
+      ktier[j] = 0; kang[j] = a;
+    }
+    // a smear of ink along a segment, so a drag lays a continuous ribbon
+    function inkSeg(ax, ay, bx, by, rad, count, life) {
+      for (var i = 0; i < count; i++) {
+        var u = Math.random(), a = rand(0, TAU), rr = rad * Math.sqrt(Math.random());
+        /* only a light jitter on the lifetime: neighbouring tracers that fade
+           far apart land in different luminance bands and mottle what should
+           read as one body of dye */
+        addInk(ax + (bx - ax) * u + Math.cos(a) * rr,
+               ay + (by - ay) * u + Math.sin(a) * rr,
+               life * rand(0.87, 1.13));
+      }
+    }
+
+    return {
+      id: 'ink-eddy',
+      name: 'Ink Eddy',
+      init: function (env) {
+        var w = env.width, h = env.height, i;
+        f = makeFluid(w, h);
+        asleep = true;
+        first = true;
+        holding = false;
+        inkAcc = 0;
+        kcap = countFor(w, h, 100, 900, 4200);
+        kx = new Float32Array(kcap); ky = new Float32Array(kcap);
+        kpx = new Float32Array(kcap); kpy = new Float32Array(kcap);
+        kage = new Float32Array(kcap); klife = new Float32Array(kcap);
+        ktier = new Uint8Array(kcap); kang = new Float32Array(kcap);
+        kn = 0; kcur = 0;
+        motes.length = 0;
+        var n = countFor(w, h, 90000, 4, 12);
+        for (i = 0; i < n; i++) {
+          motes.push({ x: rand(0, w), y: rand(0, h), ph: rand(0, TAU) });
+        }
+        bg = makeBackdrop(env, function (g, W, H) {
+          // deep still water, almost black, holding one pale pool of sky
+          var base = g.createLinearGradient(0, 0, 0, H);
+          base.addColorStop(0, 'rgb(11,15,24)');
+          base.addColorStop(0.55, 'rgb(8,11,18)');
+          base.addColorStop(1, 'rgb(5,7,12)');
+          g.fillStyle = base;
+          g.fillRect(0, 0, W, H);
+          var pool = g.createRadialGradient(W * 0.38, H * 0.32, 0,
+                                            W * 0.38, H * 0.32, Math.max(W, H) * 0.55);
+          pool.addColorStop(0, 'rgba(34,50,74,0.6)');
+          pool.addColorStop(1, 'rgba(34,50,74,0)');
+          g.fillStyle = pool;
+          g.fillRect(0, 0, W, H);
+          // the near bank, a shade darker, closing the bottom of the frame
+          ridge(g, W, H, 0.955, 0.014, 3.1, 0.007, 7.3, 0.6, 'rgb(4,6,10)');
+        });
+      },
+      cast: function (env, seed) {
+        seed = seed || {};
+        if (!f) return;
+        asleep = false;
+        var x = num(seed.x, env.width / 2), y = num(seed.y, env.height / 2);
+        var vx = num(seed.vx, 0), vy = num(seed.vy, 0);
+        var sp = Math.hypot(vx, vy);
+        var ux = sp > 1 ? vx / sp : 0, uy = sp > 1 ? vy / sp : 0;
+        var pw = seedPower(seed), cz = seedCharge(seed);
+
+        if (cz > 0 && holding) {
+          /* release: the eddy is handed over exactly as it stands and simply
+             pushed off along the throw — it meanders and unwinds by itself */
+          var js = clamp(sp * 0.26, 25, 320);
+          stir(f, holdX, holdY, holdSig * 1.5, 0, ux * js, uy * js, 0.7);
+          inkSeg(holdX, holdY, holdX, holdY, holdSig * 0.9, 90, 7.5);
+          holding = false;
+          return;
+        }
+
+        if (pw <= 0.45) {
+          // drag: a stroke of ink laid down with the current that painted it,
+          // whose edge shear rolls into curls once the finger has gone
+          var jd = clamp(sp * 0.24, 40, 260);
+          var sd = f.s * 2.1;
+          stir(f, x, y, sd, 0, ux * jd, uy * jd, 0.55);
+          inkSeg(x - ux * 26, y - uy * 26, x, y, sd * 0.7, 85, 6.5);
+          return;
+        }
+
+        /* tap and flick are one gesture seen at two speeds: the throw becomes
+           a jet, and whatever energy is not in the throw becomes spin. A still
+           tap is therefore pure spiral, a hard flick pure mushroom.
+           The eddy sits at the finger, but the ink is laid as a TONGUE off to
+           one side of it, reaching from the eye out past the shear: a round
+           blob of dye turning about its own middle stays a round blob however
+           fast it spins, and only dye lying ACROSS the shear gets drawn out
+           into an arm. */
+        var sig = f.s * (2.8 + 1.8 * pw); // wide enough that the coarse grid
+        var jet = clamp(sp * 0.30, 0, 420); // does not diffuse the eddy away
+        var omega = (4.0 + 2.4 * pw) * clamp(1 - sp / 300, 0.2, 1); // rad/s at the eye
+        if (Math.random() < 0.5) spinDir = -spinDir;
+        stir(f, x, y, sig, omega * sig / LO_PEAK * spinDir, ux * jet, uy * jet, 0.85);
+        var la = rand(0, TAU), lc = Math.cos(la), ls = Math.sin(la);
+        inkSeg(x + lc * sig * 1.15, y + ls * sig * 1.15,
+               x + lc * sig * 0.15, y + ls * sig * 0.15,
+               sig * 0.6, 220 + Math.round(pw * 360), 7 + pw * 2);
+        if (cz > 0) { // a charged seed with nothing held: one big slow bloom
+          stir(f, x, y, sig * 1.6, omega * sig * (1 + cz) / LO_PEAK * spinDir, 0, 0, 0.6);
+          inkSeg(x - lc * sig * 0.9, y - ls * sig * 0.9, x, y,
+                 sig * 0.7, Math.round(140 * cz), 9);
+        }
+      },
+      frame: function (env) {
+        var ctx = env.ctx, w = env.width, h = env.height, t = env.t, dt = env.dt;
+        var i, tr;
+        ctx.globalCompositeOperation = 'source-over';
+        drawBackdrop(ctx, bg, w, h, first ? 1 : 0.18, 'rgb(8,11,18)');
+        first = false;
+
+        // scenery in motion: the pool of sky on the water breathes and slides
+        // across the pond over ~20s
+        var sb = 0.5 + 0.5 * Math.sin(t * 0.31);
+        var gxp = w * 0.38 + Math.sin(t * 0.13) * w * 0.05;
+        var gyp = h * 0.32 + Math.sin(t * 0.09 + 1.4) * h * 0.03;
+        var pg = ctx.createRadialGradient(gxp, gyp, 0, gxp, gyp, Math.max(w, h) * 0.45);
+        pg.addColorStop(0, 'rgba(62,92,134,' + (0.012 + 0.013 * sb) + ')');
+        pg.addColorStop(1, 'rgba(62,92,134,0)');
+        ctx.fillStyle = pg;
+        ctx.fillRect(0, 0, w, h);
+
+        // charge: circulation builds and tightens under the finger, and the
+        // eye pulses once it is full
+        var chg = chargeInfo(env);
+        if (chg && f) {
+          asleep = false;
+          if (!holding) {
+            holding = true;
+            if (Math.random() < 0.5) spinDir = -spinDir;
+          }
+          holdX = chg.x; holdY = chg.y;
+          holdSig = f.s * (3.4 - 1.5 * chg.lv);
+          var om = 1.8 + 3.4 * chg.lv;
+          if (chg.lv > 0.9) om *= 1 + 0.14 * Math.sin(t * 5.5);
+          stir(f, holdX, holdY, holdSig, om * holdSig / LO_PEAK * spinDir,
+               0, 0, 1 - Math.exp(-5 * dt));
+          inkAcc += dt * (90 + 220 * chg.lv);
+          while (inkAcc >= 1) {
+            var ia = rand(0, TAU), ir = holdSig * rand(0.5, 1.15);
+            addInk(holdX + Math.cos(ia) * ir, holdY + Math.sin(ia) * ir, rand(5, 8));
+            inkAcc -= 1;
+          }
+        } else if (holding) {
+          holding = false; // hold abandoned: the eddy is left to unwind alone
+        }
+
+        // the pond, and the ink riding it (RK2, so a tight vortex does not
+        // spiral its own ink outward)
+        if (f && !asleep) {
+          step(f, dt);
+          var lim = 0.5;
+          for (i = kn - 1; i >= 0; i--) {
+            kage[i] += dt;
+            if (kage[i] >= klife[i]) {
+              kn--;
+              if (i !== kn) {
+                kx[i] = kx[kn]; ky[i] = ky[kn]; kpx[i] = kpx[kn]; kpy[i] = kpy[kn];
+                kage[i] = kage[kn]; klife[i] = klife[kn];
+                ktier[i] = ktier[kn]; kang[i] = kang[kn];
+              }
+              continue;
+            }
+            var x = kx[i], y = ky[i];
+            var mx = x + sampleU(f, x, y) * dt * 0.5;
+            var my = y + sampleV(f, x, y) * dt * 0.5;
+            var ivx = sampleU(f, mx, my), ivy = sampleV(f, mx, my);
+            x += ivx * dt; y += ivy * dt;
+            if (x < lim) x = lim; else if (x > f.iw - lim) x = f.iw - lim;
+            if (y < lim) y = lim; else if (y > f.ih - lim) y = f.ih - lim;
+            kx[i] = x; ky[i] = y;
+            /* the drawn tail, worked out once here instead of in each of the
+               seven stroke passes: the motion streak, plus a short fixed
+               fibre so that ink at rest still lies as a thread at its own
+               angle rather than as a round bead */
+            var fl = FIBRE * (0.45 + 1.3 * ((kang[i] * 0.618034) % 1)); // varied, free
+            kpx[i] = x - ivx * dt * 2.6 - Math.cos(kang[i]) * fl;
+            kpy[i] = y - ivy * dt * 2.6 - Math.sin(kang[i]) * fl;
+            var lum = lifeAlpha(kage[i], klife[i]) *
+                      (0.3 + 0.7 * Math.min(1, Math.hypot(ivx, ivy) / 200));
+            ktier[i] = clamp(Math.floor(lum * 5), 0, 4);
+          }
+          if (kn === 0 && f.maxSpeed < SLEEP_V) {
+            asleep = true; // nothing left to move: the sim costs nothing now
+            stillness(f);
+          }
+        }
+
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.lineCap = 'round';
+
+        // ambient whisper: dust on the water, drifting on its own until the
+        // pond is stirred, and then carried by it
+        for (i = 0; i < motes.length; i++) {
+          var m = motes[i];
+          var fa = field(m.x, m.y, t);
+          var mvx = Math.cos(fa) * 3, mvy = Math.sin(fa) * 3;
+          if (f && !asleep) { mvx += sampleU(f, m.x, m.y); mvy += sampleV(f, m.x, m.y); }
+          m.x += mvx * dt; m.y += mvy * dt;
+          if (m.x < 0) m.x = w; else if (m.x > w) m.x = 0;
+          if (m.y < 0) m.y = h; else if (m.y > h) m.y = 0;
+          ctx.fillStyle = 'rgba(150,180,225,' + (0.03 + 0.022 * Math.sin(t * 0.5 + m.ph)) + ')';
+          ctx.fillRect(m.x, m.y, 1.4, 1.4);
+        }
+
+        /* the ink, as short motion streaks: one broad, very faint pass over
+           every particle first, which is what fuses several thousand separate
+           tracers into one continuous body of dye rather than a spray of
+           specks, then one batched stroke per luminance band on top */
+        if (kn > 0) {
+          // one broad, almost invisible pass for the diffuse body of the dye
+          ctx.beginPath();
+          for (i = 0; i < kn; i++) {
+            ctx.moveTo(kpx[i], kpy[i]);
+            ctx.lineTo(kx[i], ky[i]);
+          }
+          ctx.lineWidth = 8;
+          ctx.strokeStyle = 'rgba(118,152,212,0.015)';
+          ctx.stroke();
+          /* the dye itself, one batched stroke per luminance band. The stroke
+             is deliberately WIDER than the gap between tracers: a hairline per
+             particle would draw the cloud as a spray of separate beads, and it
+             is ink, not confetti. Detail lives in the shape of the cloud. */
+          ctx.lineWidth = 4.2;
+          for (tr = 0; tr < 5; tr++) {
+            ctx.strokeStyle = INK[tr] + INK_A[tr] + ')';
+            ctx.beginPath();
+            for (i = 0; i < kn; i++) {
+              if (ktier[i] !== tr) continue;
+              ctx.moveTo(kpx[i], kpy[i]);
+              ctx.lineTo(kx[i], ky[i]);
+            }
+            ctx.stroke();
+          }
+          // and a hairline highlight only along the fastest threads, which is
+          // where real dye catches the light
+          ctx.lineWidth = 1.2;
+          ctx.strokeStyle = 'rgba(245,250,255,0.15)';
+          ctx.beginPath();
+          for (i = 0; i < kn; i++) {
+            if (ktier[i] < 4) continue;
+            ctx.moveTo(kpx[i], kpy[i]);
+            ctx.lineTo(kx[i], ky[i]);
+          }
+          ctx.stroke();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    };
+  }
+
   window.SwirlsEffects = [
     driftTide(),
     emberBreath(),
@@ -2381,6 +3129,7 @@
     petalFall(),
     opalRise(),
     fireflyMeadow(),
-    duskFountain()
+    duskFountain(),
+    inkEddy()
   ];
 })();
