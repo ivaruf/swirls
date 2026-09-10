@@ -291,6 +291,10 @@
       #splash-mark::before, #splash-mark::after { animation: none; }
     }
   </style>
+<!-- A way back to the arcade, but only when the arcade is what framed us:
+     standalone this adds nothing at all. Classic and deferred on purpose, so
+     /arcade/ being unreachable costs a button rather than the whole page. -->
+<script src="../arcade/exit.js" defer></script>
 </head>
 <body>
   <canvas id="c"></canvas>
