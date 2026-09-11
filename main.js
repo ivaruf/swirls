@@ -461,6 +461,44 @@
     for (i = 0; i < effects.length; i++) {
       menuCells.push(makeCell(effects[i], i, thumbs[i]));
     }
+    addExitRow();
+  }
+
+  /**
+   * A way out of swirls, under the effects and across the whole panel.
+   *
+   * Only built when the arcade's exit.js actually answered. It is another
+   * repository's file and is allowed to be missing, and an exit that cannot
+   * exit is worse than none — so a swirls served on its own with /arcade/
+   * unreachable simply keeps the menu it has always had.
+   *
+   * Safe to read window.ArcadeExit here even though main.js is a classic
+   * script at the end of the body and exit.js is deferred in the head: boot
+   * waits two animation frames, and deferred scripts have all run well before
+   * the first one.
+   */
+  function addExitRow() {
+    var exit = window.ArcadeExit;
+    if (!exit) return;
+
+    var row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'menu-exit';
+    row.textContent = exit.verb({
+      arcade: 'back to the arcade',
+      app: 'close swirls',
+      tab: 'close swirls'
+    });
+    row.addEventListener('click', function () {
+      exit.quit().then(function (how) {
+        // Refused: the browser will not close a tab it did not open. Say so
+        // here, quietly, rather than leaving a control that does nothing.
+        if (how !== 'refused') return;
+        row.textContent = 'close this tab yourself';
+        row.disabled = true;
+      });
+    });
+    menuPanel.appendChild(row);
   }
 
   function updateMenuHighlight() {

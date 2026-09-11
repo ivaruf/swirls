@@ -166,6 +166,31 @@
       border-color: rgba(255, 255, 255, 0.35);
     }
 
+    /* Leaving swirls, across the foot of the panel and under a hairline. Lower
+       case and unhurried like everything else here; it is a way out, not a
+       decision the panel wants to push you towards. */
+    .menu-exit {
+      grid-column: 1 / -1;
+      margin: 6px 0 0;
+      padding: 11px 7px 4px;
+      background: none;
+      border: 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      font: inherit;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+      color: rgba(255, 255, 255, 0.5);
+      cursor: pointer;
+      transition: color 0.25s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .menu-exit:disabled { cursor: default; }
+
+    @media (hover: hover) {
+      .menu-exit:not(:disabled):hover { color: rgba(255, 255, 255, 0.9); }
+    }
+
     @media (hover: hover) {
       .menu-cell:hover { opacity: 1; }
     }
@@ -291,9 +316,11 @@
       #splash-mark::before, #splash-mark::after { animation: none; }
     }
   </style>
-<!-- A way back to the arcade, but only when the arcade is what framed us:
-     standalone this adds nothing at all. Classic and deferred on purpose, so
-     /arcade/ being unreachable costs a button rather than the whole page. -->
+<!-- What quitting means here: back to the arcade when the arcade is what
+     framed us, closing the window when we are installed, and an honest note
+     when we are a tab no script may close. It draws nothing — the button is
+     ours. Classic and deferred on purpose, so /arcade/ being unreachable
+     costs the quit button rather than the whole page. -->
 <script src="../arcade/exit.js" defer></script>
 </head>
 <body>
