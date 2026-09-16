@@ -11,6 +11,9 @@ var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
   './',
   './index.html',
+  // Has to be IN the cache, not merely deployed: the players this rescues
+  // are the ones whose browser has stopped asking this origin for anything.
+  './moved.js',
   './main.js',
   './effects.js',
   './manifest.webmanifest',
