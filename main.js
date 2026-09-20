@@ -9,11 +9,25 @@
   var menuEl = document.getElementById('menu');
   var menuPanel = document.getElementById('menu-panel');
   var errorEl = document.getElementById('error');
+  var splashEl = document.getElementById('splash');
+  var titleActionsEl = document.getElementById('title-actions');
+  var titleExitEl = document.getElementById('title-exit');
+  var beginBtn = document.getElementById('begin');
+  var soundEl = document.getElementById('sound');
+  var soundPanel = document.getElementById('sound-panel');
+  var soundOpenBtn = document.getElementById('sound-open');
+  var soundBackBtn = document.getElementById('sound-back');
 
   var effects = window.SwirlsEffects;
   if (!effects || !effects.length) {
     errorEl.classList.add('show');
     hideSplash();
+    // Nothing below this line runs, so the panel behind the speaker is never
+    // wired. Take the speaker away rather than leaving a button that answers
+    // to nothing on a screen that is already admitting something went wrong.
+    // The fullscreen icon beside it is unaffected: screen.js is its own file
+    // and does not care whether this one got anywhere.
+    soundOpenBtn.hidden = true;
     return;
   }
 
@@ -23,6 +37,12 @@
 
   var KEY_MODE = 'swirls:mode';
   var KEY_HINT = 'swirls:hint-dismissed';
+  // The two above are the old colon style and stay exactly as they are —
+  // renaming a live key silently throws away what every existing player has
+  // already chosen. New keys take the hub's current shape instead
+  // (CLAUDE.md §6), which is why these two do not match their neighbours.
+  var KEY_VOL_MUSIC = 'swirls.vol.music.v1';
+  var KEY_VOL_SFX = 'swirls.vol.sfx.v1';
 
   function storeGet(key) {
     try { return window.localStorage.getItem(key); } catch (e) { return null; }
@@ -350,12 +370,21 @@
 
   window.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
-      if (menuOpen) {
+      if (soundOpen) {
+        e.preventDefault();
+        closeSound();
+      } else if (menuOpen) {
         e.preventDefault();
         closeMenu();
       }
       return;
     }
+    // Space and the arrows cast and switch, which is not what either open
+    // panel is for — and Space would otherwise both press the focused button
+    // and change the effect behind it. The title screen is deliberately NOT
+    // in this test: its one button answers to Space by itself, and an effect
+    // quietly changing behind the curtain harms nothing.
+    if (soundOpen || menuOpen) return;
     if (e.key === 'ArrowRight' || e.key === ' ' || e.code === 'Space') {
       e.preventDefault();
       switchEffect(1);
@@ -477,13 +506,13 @@
    * waits two animation frames, and deferred scripts have all run well before
    * the first one.
    */
-  function addExitRow() {
+  function makeExitButton(className) {
     var exit = window.ArcadeExit;
-    if (!exit) return;
+    if (!exit) return null;
 
     var row = document.createElement('button');
     row.type = 'button';
-    row.className = 'menu-exit';
+    row.className = className;
     row.textContent = exit.verb({
       arcade: 'back to the arcade',
       app: 'close swirls',
@@ -498,7 +527,24 @@
         row.disabled = true;
       });
     });
-    menuPanel.appendChild(row);
+    return row;
+  }
+
+  function addExitRow() {
+    var row = makeExitButton('menu-exit');
+    if (row) menuPanel.appendChild(row);
+  }
+
+  /**
+   * The same way out, on the title screen, where someone who opened swirls
+   * from the arcade by mistake is most likely to want it. Built here rather
+   * than written into index.html for the same reason the menu's is: it is
+   * another repository's file that is allowed to be missing, and a door that
+   * cannot open is worse than no door.
+   */
+  function addTitleExit() {
+    var row = makeExitButton('title-exit');
+    if (row) titleExitEl.appendChild(row);
   }
 
   function updateMenuHighlight() {
@@ -531,6 +577,109 @@
   // the overlay sits above the canvas, so none of this ever casts a seed
   menuEl.addEventListener('click', function (e) {
     if (e.target === menuEl) closeMenu();
+  });
+
+  // ---- sound panel --------------------------------------------------------------
+
+  /**
+   * Two levels, and today nothing whatsoever to apply them to.
+   *
+   * swirls has never made a sound. The panel is here anyway, deliberately:
+   * the levels are written down for real, so on the day these patterns find a
+   * voice it arrives at the level its listener already chose rather than at
+   * full blast. What is NOT here is an audio engine, a silent AudioContext,
+   * or any pretence — the panel says in its own words that the game is
+   * silent, and that line goes when the sound comes.
+   */
+  var soundOpen = false;
+
+  function volumeOf(key, fallback) {
+    var raw = storeGet(key);
+    if (raw === null) return fallback;
+    var n = Number(raw);
+    // localStorage is one namespace shared by every game on this origin and
+    // anything at all may have written here. Trust the range, not the store.
+    if (!isFinite(n)) return fallback;
+    return Math.min(1, Math.max(0, n));
+  }
+
+  function wireFader(inputId, outputId, key, fallback) {
+    var input = document.getElementById(inputId);
+    var out = document.getElementById(outputId);
+    input.value = String(Math.round(volumeOf(key, fallback) * 100));
+    out.textContent = input.value;
+    // `input`, not `change`: the number should follow the thumb, which is the
+    // only feedback this panel can honestly give until there is something to
+    // hear.
+    input.addEventListener('input', function () {
+      out.textContent = input.value;
+      storeSet(key, String(Number(input.value) / 100));
+    });
+  }
+
+  wireFader('vol-music', 'vol-music-out', KEY_VOL_MUSIC, 0.6);
+  wireFader('vol-sfx', 'vol-sfx-out', KEY_VOL_SFX, 0.8);
+
+  function openSound() {
+    soundOpen = true;
+    soundEl.classList.add('open');
+    soundEl.setAttribute('aria-hidden', 'false');
+    // Focus lands inside the thing that just appeared rather than staying on
+    // the body behind it; #sound-panel carries tabindex="-1" to receive it.
+    soundPanel.focus();
+  }
+
+  function closeSound() {
+    soundOpen = false;
+    soundEl.classList.remove('open');
+    soundEl.setAttribute('aria-hidden', 'true');
+    soundOpenBtn.focus();
+  }
+
+  soundOpenBtn.addEventListener('click', function () {
+    if (soundOpen) closeSound();
+    else openSound();
+  });
+
+  soundBackBtn.addEventListener('click', closeSound);
+
+  // Tap the dimmed backdrop to close, exactly as the effect menu does. The
+  // overlay sits above the canvas, so none of this ever casts a seed.
+  soundEl.addEventListener('click', function (e) {
+    if (e.target === soundEl) closeSound();
+  });
+
+  // ---- title screen --------------------------------------------------------------
+
+  /**
+   * The moment the splash stops being a curtain and becomes a door.
+   *
+   * Called from boot(), once an effect is genuinely running on the canvas
+   * underneath — so what you are deciding to enter is already moving behind
+   * the wordmark. That is the whole argument for a title screen on a toy
+   * that used to start instantly: it shows you what swirls is before it asks
+   * whether you want in, and it gives the corner's two icons somewhere to be
+   * reached from before anything has happened.
+   */
+  function armTitle() {
+    if (!splashEl) return;
+    addTitleExit();
+    titleActionsEl.hidden = false;
+    splashEl.classList.add('armed');
+    // It was aria-hidden while it was pure decoration over an empty canvas.
+    // It holds two real buttons now, and a screen reader has to be able to
+    // find them.
+    splashEl.setAttribute('aria-hidden', 'false');
+  }
+
+  beginBtn.addEventListener('click', function () {
+    splashEl.classList.remove('armed');
+    hideSplash();
+    // The hint gets its one four-second showing HERE rather than at boot.
+    // Shown at boot it would have burnt that showing behind the title screen
+    // and marked itself seen, so the one line telling a first-time player how
+    // to cast would never have been read by anybody.
+    showHintOnce();
   });
 
   // ---- boot splash --------------------------------------------------------------
@@ -566,9 +715,10 @@
     }
 
     setEffect(initialIndex);
-    showHintOnce();
     start();
-    hideSplash();
+    // Not hideSplash(): the splash arms into the title screen instead, and
+    // the hint waits for `begin` so it is not spent behind it.
+    armTitle();
   }
 
   // Two frames of headroom so the splash is actually on screen before

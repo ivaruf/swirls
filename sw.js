@@ -5,7 +5,7 @@
    served while the download finishes in the background to refresh the
    cache for next launch. Requests with nothing cached wait indefinitely,
    since there is nothing to fall back to. */
-var CACHE = 'swirls-v3';
+var CACHE = 'swirls-v4'; // a title screen, and a corner holding sound and fullscreen
 var ANSWER_TIMEOUT = 3000;
 var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
@@ -16,6 +16,10 @@ var ASSETS = [
   './moved.js',
   './main.js',
   './effects.js',
+  // Nothing imports this one — it is its own classic script precisely so a
+  // failure anywhere else cannot take it down — so nothing else would ever
+  // pull it into the cache on its behalf.
+  './screen.js',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
@@ -34,7 +38,14 @@ self.addEventListener('activate', function (e) {
   e.waitUntil(
     caches.keys().then(function (keys) {
       return Promise.all(keys.map(function (k) {
-        if (k !== CACHE) return caches.delete(k);
+        // ONLY OUR OWN OLD CACHES. CacheStorage is per ORIGIN, not per scope,
+        // and every game in this hub is served from the one origin — so the
+        // obvious `k !== CACHE` this used to say was deleting fishtank's
+        // cache, supermine's, dam_break's and everyone else's on every visit
+        // to swirls, taking their offline support with it until each was
+        // opened online again. The slug prefix is what makes the filter mean
+        // "mine", and it is why hub CLAUDE.md §3 asks for one.
+        if (k !== CACHE && k.indexOf('swirls-') === 0) return caches.delete(k);
       }));
     }).then(function () { return self.clients.claim(); })
   );

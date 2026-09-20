@@ -303,6 +303,292 @@
       color: rgba(255, 255, 255, 0.55);
     }
 
+    /* ---- the title's two doors ---------------------------------------------
+       Armed by main.js once an effect is actually running behind the screen.
+       Until that moment the splash is the curtain it has always been —
+       pointer-events:none — so a tap landing during boot is ignored rather
+       than pressing a button nothing has wired up yet. */
+    #splash.armed { pointer-events: auto; }
+
+    #title-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      margin-top: 34px;
+      opacity: 0;
+      transition: opacity 0.7s ease;
+    }
+
+    #title-actions[hidden] { display: none; }
+    #splash.armed #title-actions { opacity: 1; }
+
+    .title-go {
+      min-width: 168px;
+      padding: 13px 26px;
+      background: none;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 999px;
+      font: inherit;
+      font-size: 14px;
+      letter-spacing: 0.3em;
+      /* letter-spacing hangs a gap off the last letter; put it back on the
+         front so the word sits centred in its own pill. */
+      text-indent: 0.3em;
+      color: rgba(255, 255, 255, 0.85);
+      cursor: pointer;
+      transition: border-color 0.25s ease, color 0.25s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    @media (hover: hover) {
+      .title-go:hover { border-color: rgba(255, 255, 255, 0.55); color: #fff; }
+    }
+
+    /* The way out, under the door in. Same lower-case, unhurried voice as the
+       effect menu's own exit row: it is a way out, not a decision the screen
+       wants to push you towards. */
+    .title-exit {
+      margin: 6px 0 0;
+      padding: 11px 14px;
+      background: none;
+      border: 0;
+      font: inherit;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+      color: rgba(255, 255, 255, 0.45);
+      cursor: pointer;
+      transition: color 0.25s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .title-exit:disabled { cursor: default; }
+
+    @media (hover: hover) {
+      .title-exit:hover:not(:disabled) { color: rgba(255, 255, 255, 0.8); }
+    }
+
+    /* ---- the corner: sound and fullscreen ----------------------------------
+       Above the title screen, so both icons are reachable while it is still
+       up — filling the screen is a thing you might want to do BEFORE
+       beginning, not only after. Top right is free: swirls' own two controls,
+       the gear and the next arrow, have always lived along the bottom edge,
+       so this cluster never has to argue with them for a corner. */
+    #corner-tools {
+      position: fixed;
+      z-index: 60;
+      top: calc(8px + env(safe-area-inset-top, 0px));
+      right: calc(8px + env(safe-area-inset-right, 0px));
+      display: flex;
+      gap: 2px;
+    }
+
+    .icon-button {
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      padding: 0;
+      background: none;
+      border: none;
+      border-radius: 50%;
+      color: #fff;
+      opacity: 0.4;
+      cursor: pointer;
+      transition: opacity 0.3s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* `hidden` is only a presentation hint and loses to any rule that sets
+       `display`, which the flex above does — so without this the fullscreen
+       button would appear on precisely the browser it exists to hide from. */
+    .icon-button[hidden] { display: none; }
+
+    .icon-button svg { display: block; width: 22px; height: 22px; }
+
+    .icon-button:focus-visible {
+      opacity: 1;
+      outline: 1px solid rgba(255, 255, 255, 0.5);
+      outline-offset: 2px;
+    }
+
+    @media (hover: hover) {
+      .icon-button:hover { opacity: 0.8; }
+    }
+
+    /* One glyph or the other, never both, and aria-pressed is the single
+       source of truth for which: screen.js writes it, this reads it, so the
+       picture cannot drift from what the label says. */
+    #screen-toggle .icon-on { display: none; }
+    #screen-toggle[aria-pressed="true"] .icon-off { display: none; }
+    #screen-toggle[aria-pressed="true"] .icon-on { display: block; }
+
+    /* ---- the sound panel ---------------------------------------------------
+       The same overlay language as the effect menu — dimmed backdrop, frosted
+       panel, one hairline — because they are the same kind of door. */
+    #sound {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 70;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.45);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.25s ease, visibility 0.25s ease;
+    }
+
+    #sound.open { opacity: 1; visibility: visible; }
+
+    #sound-panel {
+      box-sizing: border-box;
+      width: min(320px, calc(100vw - 24px));
+      max-height: calc(100vh - 24px);
+      overflow-y: auto;
+      padding: 18px 16px 12px;
+      background: rgba(8, 10, 13, 0.82);
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    #sound-panel:focus { outline: none; }
+
+    #sound-title {
+      margin: 0 0 16px;
+      font-size: 12px;
+      font-weight: 400;
+      letter-spacing: 0.3em;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    /* Label, fader, number. Every label is the same width, so both faders
+       start at the same x and the two rows read as one control rather than as
+       two unrelated ones. */
+    .vol-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 10px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .vol-label {
+      flex: 0 0 56px;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .vol-out {
+      flex: 0 0 26px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: rgba(255, 255, 255, 0.4);
+    }
+
+    /* 34px of height for a 2px line, because the height is the touch target
+       and a finger is the pointer this game expects. */
+    .vol-row input[type="range"] {
+      flex: 1 1 0;
+      min-width: 0;
+      height: 34px;
+      margin: 0;
+      background: none;
+      -webkit-appearance: none;
+      appearance: none;
+      cursor: pointer;
+    }
+
+    .vol-row input[type="range"]:focus { outline: none; }
+
+    .vol-row input[type="range"]:focus-visible::-webkit-slider-thumb {
+      box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.35);
+    }
+
+    .vol-row input[type="range"]::-webkit-slider-runnable-track {
+      height: 2px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    .vol-row input[type="range"]::-moz-range-track {
+      height: 2px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    /* The thumb takes one of the seven hues off the mark above it. */
+    .vol-row input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      margin-top: -7px;
+      border: 0;
+      border-radius: 50%;
+      background: #A87CFF;
+    }
+
+    .vol-row input[type="range"]::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border: 0;
+      border-radius: 50%;
+      background: #A87CFF;
+    }
+
+    .vol-note {
+      margin: 14px 0 0;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 12px;
+      line-height: 1.6;
+      color: rgba(255, 255, 255, 0.42);
+    }
+
+    .panel-back {
+      display: block;
+      width: 100%;
+      margin: 10px 0 0;
+      padding: 11px 7px;
+      background: none;
+      border: 0;
+      font: inherit;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+      color: rgba(255, 255, 255, 0.5);
+      cursor: pointer;
+      transition: color 0.25s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    @media (hover: hover) {
+      .panel-back:hover { color: rgba(255, 255, 255, 0.8); }
+    }
+
+    /* A phone on its side is 300–430px tall and a browser toolbar can take
+       fifty of those, so what runs off the bottom is whatever is last in the
+       column — which here is the way out. The mark is the one thing on this
+       screen that can afford to lose height, so it is what gives it up. */
+    @media (orientation: landscape) and (max-height: 500px) {
+      #splash-mark { width: 60px; height: 60px; margin-bottom: 16px; }
+      #title-actions { margin-top: 18px; }
+      .title-go { padding: 10px 24px; }
+      #sound-panel { padding: 14px 16px 10px; }
+      #sound-title { margin-bottom: 10px; }
+      .vol-row { margin-bottom: 4px; }
+      .vol-row input[type="range"] { height: 30px; }
+      .vol-note { margin-top: 10px; padding-top: 9px; line-height: 1.5; }
+    }
+
     @keyframes splash-spin {
       to { transform: rotate(360deg); }
     }
@@ -348,11 +634,99 @@
     <div id="menu-panel"></div>
   </div>
   <div id="error">no effects loaded</div>
+
+  <!--
+    THE CORNER. Sound and fullscreen, as icons, top right — the shape fishtank
+    and neonfox arrived at, and for their reasons: neither belongs to a
+    particular effect, neither is a setting of the piece you are watching, and
+    a symbol survives being shrunk to a corner where a word does not.
+
+    Top right is free here. swirls' own two controls — the gear and the next
+    arrow — have always lived along the bottom edge, so this cluster can stay
+    on every screen without ever having to argue with them for the corner.
+
+    Art carries the meaning, so both buttons carry a real aria-label and title,
+    and screen.js rewrites the fullscreen one as the state changes.
+  -->
+  <div id="corner-tools">
+    <button type="button" id="sound-open" class="icon-button" aria-label="sound" title="sound">
+      <!-- A speaker and two waves, and deliberately no slash: this one opens a
+           panel rather than muting anything. -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M11 5 6 9H3v6h3l5 4Z"/>
+        <path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>
+      </svg>
+    </button>
+    <!-- Hidden until screen.js has confirmed this browser has element
+         fullscreen at all — iPhone Safari does not, and a button that does
+         nothing when pressed is worse than no button. -->
+    <button type="button" id="screen-toggle" class="icon-button"
+            aria-pressed="false" aria-label="fullscreen" title="fullscreen" hidden>
+      <!-- Four corners pushing out, and the same four pulled in for the
+           pressed state. CSS shows one and hides the other. -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path class="icon-off" d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6"/>
+        <path class="icon-on" d="M3 9h6V3m12 6h-6V3M9 15H3v6m12 0v-6h6"/>
+      </svg>
+    </button>
+  </div>
+
+  <!--
+    The sound panel. Two levels, kept in the same overlay language as the
+    effect menu it sits beside — the dimmed backdrop, the frosted panel, the
+    same hairline — because they are the same kind of door.
+
+    swirls makes no sound today, and the panel says so in its own words rather
+    than leaving two faders that quietly do nothing. The levels are stored for
+    real all the same, so whenever a voice does arrive it arrives at the level
+    its listener already chose instead of at full blast.
+  -->
+  <div id="sound" aria-hidden="true">
+    <div id="sound-panel" role="dialog" aria-labelledby="sound-title" aria-modal="true" tabindex="-1">
+      <h2 id="sound-title">sound</h2>
+      <label class="vol-row" for="vol-music">
+        <span class="vol-label">music</span>
+        <input type="range" id="vol-music" min="0" max="100" step="1" value="60">
+        <output class="vol-out" id="vol-music-out" for="vol-music">60</output>
+      </label>
+      <label class="vol-row" for="vol-sfx">
+        <span class="vol-label">effects</span>
+        <input type="range" id="vol-sfx" min="0" max="100" step="1" value="80">
+        <output class="vol-out" id="vol-sfx-out" for="vol-sfx">80</output>
+      </label>
+      <p class="vol-note">swirls is silent so far — there is nothing yet for
+        these to turn down. they are saved to this device anyway, so the day
+        the patterns find a voice it will arrive at your level.</p>
+      <button type="button" id="sound-back" class="panel-back">back</button>
+    </div>
+  </div>
+
+  <!--
+    The title screen, which is also the boot splash — one element, because the
+    mark and the wordmark were already drawn here and a second screen carrying
+    the same art would be a second thing to keep in step.
+
+    For its first two frames it is exactly what it always was: a cover over an
+    empty canvas, pointer-events:none so it can never swallow a cast. Once
+    main.js has an effect running underneath, it arms: the actions fade in, it
+    starts taking pointers, and it is a door rather than a curtain. The piece
+    is already moving behind it, which is the point — swirls shows you what it
+    is before asking whether you want in.
+  -->
   <div id="splash" aria-hidden="true">
     <div id="splash-mark"></div>
     <div id="splash-word">swirls</div>
+    <div id="title-actions" hidden>
+      <button type="button" id="begin" class="title-go">begin</button>
+      <!-- Built by main.js only when the arcade's exit.js actually answered;
+           see addExitRow(). An exit that cannot exit is worse than none. -->
+      <div id="title-exit"></div>
+    </div>
   </div>
   <script src="effects.js"></script>
+  <script src="screen.js" defer></script>
   <script src="main.js"></script>
 </body>
 </html>
