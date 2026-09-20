@@ -513,10 +513,13 @@
     var row = document.createElement('button');
     row.type = 'button';
     row.className = className;
+    // Plain words, in swirls' lower case but not in its voice. A way out is
+    // the one control someone reaches for having stopped wanting to watch,
+    // and it should read as what it does rather than as another flourish.
     row.textContent = exit.verb({
-      arcade: 'back to the arcade',
-      app: 'close swirls',
-      tab: 'close swirls'
+      arcade: 'back to arcade',
+      app: 'close',
+      tab: 'close'
     });
     row.addEventListener('click', function () {
       exit.quit().then(function (how) {
