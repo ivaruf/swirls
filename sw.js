@@ -5,7 +5,7 @@
    served while the download finishes in the background to refresh the
    cache for next launch. Requests with nothing cached wait indefinitely,
    since there is nothing to fall back to. */
-var CACHE = 'swirls-v5'; // the way out says what it does: back to arcade, or close
+var CACHE = 'swirls-v6'; // answer out of our own cache, not whichever game on the origin cached that URL first
 var ANSWER_TIMEOUT = 3000;
 var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
@@ -54,7 +54,13 @@ self.addEventListener('activate', function (e) {
 self.addEventListener('fetch', function (e) {
   if (e.request.method !== 'GET') return;
   e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then(function (cached) {
+    // `cacheName` is not optional here. A bare caches.match() searches EVERY
+    // cache on the origin, and every game in this hub shares one — so this was
+    // free to answer out of fishtank's cache, or the arcade's, for any URL they
+    // both request. ../arcade/exit.js is precisely that: the arcade precaches
+    // it, so the copy swirls got came from a store no version bump of ours
+    // could ever refresh. Scoped, a miss simply falls through to the network.
+    caches.match(e.request, { cacheName: CACHE, ignoreSearch: true }).then(function (cached) {
       if (!cached) {
         return fetch(e.request).then(function (res) {
           var copy = res.clone();
