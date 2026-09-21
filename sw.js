@@ -5,7 +5,7 @@
    served while the download finishes in the background to refresh the
    cache for next launch. Requests with nothing cached wait indefinitely,
    since there is nothing to fall back to. */
-var CACHE = 'swirls-v6'; // answer out of our own cache, not whichever game on the origin cached that URL first
+var CACHE = 'swirls-v7'; // the exit-fullscreen glyph is symmetric again — its bottom-left arm pointed the wrong way
 var ANSWER_TIMEOUT = 3000;
 var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
