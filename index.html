@@ -678,27 +678,27 @@
     effect menu it sits beside — the dimmed backdrop, the frosted panel, the
     same hairline — because they are the same kind of door.
 
-    swirls makes no sound today, and the panel says so in its own words rather
-    than leaving two faders that quietly do nothing. The levels are stored for
-    real all the same, so whenever a voice does arrive it arrives at the level
-    its listener already chose instead of at full blast.
+    Both faders start at zero and that is the whole of the off switch: swirls
+    says nothing until one of them comes up, and until then it has not even
+    fetched a sound to say it with. The markup says 0 as well as the script
+    does, so the panel never flashes a level nobody chose.
   -->
   <div id="sound" aria-hidden="true">
     <div id="sound-panel" role="dialog" aria-labelledby="sound-title" aria-modal="true" tabindex="-1">
       <h2 id="sound-title">sound</h2>
       <label class="vol-row" for="vol-music">
         <span class="vol-label">music</span>
-        <input type="range" id="vol-music" min="0" max="100" step="1" value="60">
-        <output class="vol-out" id="vol-music-out" for="vol-music">60</output>
+        <input type="range" id="vol-music" min="0" max="100" step="1" value="0">
+        <output class="vol-out" id="vol-music-out" for="vol-music">0</output>
       </label>
       <label class="vol-row" for="vol-sfx">
         <span class="vol-label">effects</span>
-        <input type="range" id="vol-sfx" min="0" max="100" step="1" value="80">
-        <output class="vol-out" id="vol-sfx-out" for="vol-sfx">80</output>
+        <input type="range" id="vol-sfx" min="0" max="100" step="1" value="0">
+        <output class="vol-out" id="vol-sfx-out" for="vol-sfx">0</output>
       </label>
-      <p class="vol-note">swirls is silent so far — there is nothing yet for
-        these to turn down. they are saved to this device anyway, so the day
-        the patterns find a voice it will arrive at your level.</p>
+      <p class="vol-note">swirls starts silent. bring music up for the theme —
+        it plays through, takes a breath, and begins again. bring effects up
+        and every cast rings.</p>
       <button type="button" id="sound-back" class="panel-back">back</button>
     </div>
   </div>
@@ -727,6 +727,9 @@
   </div>
   <script src="effects.js"></script>
   <script src="screen.js" defer></script>
+  <!-- Before main.js, which reads window.SwirlsAudio — and guarded there, so
+       this one going missing costs the sound and nothing else. -->
+  <script src="audio.js"></script>
   <script src="main.js"></script>
 </body>
 </html>

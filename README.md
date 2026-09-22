@@ -40,3 +40,33 @@ conduct them.
   opens a menu with a live portrait of every species.
 
 Your last mode is remembered between visits.
+
+## Sound
+
+**Off by default.** Both levels in the sound panel (the speaker, top right)
+start at zero, and nothing is fetched until one of them comes up — a player who
+never opens the panel never hears swirls and never downloads a byte of it.
+Raising a slider is what turns that side on, and the level is remembered.
+
+- **music** — the theme, a composed 3:39 piece. It plays through, takes a
+  five-second breath, and begins again. It is not looped: it has a written
+  fade-in and a written fade-out, so it is played whole rather than spliced.
+- **effects** — a soft chime on every cast, pitched lower and fuller the longer
+  the gesture was charged, and a rising fifth when the mode changes.
+
+### Rebuilding the audio
+
+The sources live in `tools/audio/` and the shipped `.m4a` files in `audio/` are
+their output.
+
+```sh
+# the two cues: Sonic Pi pieces -> WAV -> mono AAC, one gain across the set
+SP="/Applications/Sonic Pi.app/Contents/Resources/app/server/native/ruby/bin/ruby"
+SONIC_PI_PIECES=tools/audio "$SP" ../tools/audio/render.rb /tmp/swirls cast=4 mode=5
+node ../tools/audio/encode-oneshots.mjs /tmp/swirls audio
+
+# the theme: the master in tools/audio/ -> stereo AAC
+node tools/audio/encode.mjs
+```
+
+Sonic Pi needs the real audio device and will not run inside a sandbox.

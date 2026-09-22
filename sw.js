@@ -5,7 +5,7 @@
    served while the download finishes in the background to refresh the
    cache for next launch. Requests with nothing cached wait indefinitely,
    since there is nothing to fall back to. */
-var CACHE = 'swirls-v7'; // the exit-fullscreen glyph is symmetric again — its bottom-left arm pointed the wrong way
+var CACHE = 'swirls-v8'; // swirls has a voice: the theme and two cast cues, both levels still starting at zero
 var ANSWER_TIMEOUT = 3000;
 var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
@@ -20,12 +20,31 @@ var ASSETS = [
   // failure anywhere else cannot take it down — so nothing else would ever
   // pull it into the cache on its behalf.
   './screen.js',
+  // Same reasoning as screen.js: nothing imports audio.js either, so nothing
+  // else would ever pull it into the cache on its behalf.
+  './audio.js',
+  // The two cast cues are 18 and 26 KB. They are the sounds a player hears
+  // within a second of turning effects up, and they are small enough that
+  // precaching them costs nothing worth naming.
+  './audio/cast.m4a',
+  './audio/mode.m4a',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
   './icon-512-maskable.png',
   './apple-touch-icon.png'
 ];
+
+// audio/theme.m4a is deliberately NOT in ASSETS. It is 2.6 MB against 405 KB
+// for everything listed above put together, and install blocks on every
+// entry in that list — so precaching it would stall each version bump behind a
+// download on whatever connection the player happens to be on, for a file most
+// players never ask for at all (music defaults to zero, and audio.js fetches
+// nothing until the slider comes up). maxgear hit exactly this and its sw.js
+// documents the same answer. The fetch handler below caches it on first play
+// instead, which costs one uncached launch of music and nothing else; it needs
+// no special case, because audio.js asks for it as a plain request and the
+// handler's own put() covers it.
 
 self.addEventListener('install', function (e) {
   e.waitUntil(

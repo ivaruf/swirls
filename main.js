@@ -33,6 +33,12 @@
 
   var ctx = canvas.getContext('2d');
 
+  // The voice, if it turned up. audio.js is its own classic script and is
+  // allowed to be missing — blocked, 404, a browser with no Web Audio at all —
+  // and every call below is guarded, so swirls without it is exactly the
+  // swirls it was before it had a sound: silent, and working.
+  var audio = window.SwirlsAudio || null;
+
   // ---- localStorage (guarded: file:// on some browsers throws) ----------
 
   var KEY_MODE = 'swirls:mode';
@@ -186,6 +192,7 @@
   function switchEffect(dir) {
     dismissHint();
     setEffect(currentIndex + dir);
+    if (audio) audio.mode();
   }
 
   // ---- animation loop (paused while document is hidden) --------------------
@@ -275,6 +282,14 @@
 
   function castSeed(x, y, power, chargeLevel) {
     if (!current || typeof current.cast !== 'function') return;
+    // One chime per seed, at the seed's own weight, and pitched by how long
+    // the gesture was held. The charge is read live rather than taken from
+    // chargeLevel: a tap released mid-charge passes 0 to the effect (that is
+    // the existing contract and not this file's to change), but the hold did
+    // happen, and the sound is allowed to know it. Audio only — nothing here
+    // reaches the effect. The throttle lives in audio.js, so a drag painting
+    // a seed every 40 ms does not become a rattle.
+    if (audio) audio.cast(power, charge.active ? charge.level : 0);
     try {
       current.cast(env, {
         x: x, y: y,
@@ -365,6 +380,19 @@
   function preventTouch(e) { e.preventDefault(); }
   canvas.addEventListener('touchstart', preventTouch, { passive: false });
   canvas.addEventListener('touchmove', preventTouch, { passive: false });
+
+  // ---- waking the audio ---------------------------------------------------
+  // No browser will start audio before a gesture, so the very first one wakes
+  // it — on the window and in the capture phase, so it counts whether the
+  // gesture was a cast on the canvas, `begin` on the title screen, or a key.
+  // The listeners stay put on purpose: after the first call this is a state
+  // check, and it is also what brings the context back when the OS suspended
+  // it while the tab was in the background.
+  if (audio) {
+    var wake = function () { audio.unlock(); };
+    window.addEventListener('pointerdown', wake, true);
+    window.addEventListener('keydown', wake, true);
+  }
 
   // ---- keyboard ---------------------------------------------------------------
 
@@ -465,6 +493,10 @@
     cell.addEventListener('click', function () {
       dismissHint();
       setEffect(index);
+      // The same cue the > gives, because it is the same event: the picture
+      // is about to change. setEffect itself stays silent — boot calls it too,
+      // and swirls must not announce itself before anybody has asked it to.
+      if (audio) audio.mode();
       closeMenu();
     });
     menuPanel.appendChild(cell);
@@ -585,14 +617,14 @@
   // ---- sound panel --------------------------------------------------------------
 
   /**
-   * Two levels, and today nothing whatsoever to apply them to.
+   * Two levels, and now two things to apply them to.
    *
-   * swirls has never made a sound. The panel is here anyway, deliberately:
-   * the levels are written down for real, so on the day these patterns find a
-   * voice it arrives at the level its listener already chose rather than at
-   * full blast. What is NOT here is an audio engine, a silent AudioContext,
-   * or any pretence — the panel says in its own words that the game is
-   * silent, and that line goes when the sound comes.
+   * The day arrived: audio.js plays the theme against the music level and the
+   * cast and mode cues against the effects one. Both still default to ZERO,
+   * which is the whole of "off by default" — a player who never opens this
+   * panel never hears swirls, and never downloads a byte of it either, because
+   * nothing is fetched until a level comes up. Raising a slider is what turns
+   * that side on, so there is no switch here to forget to look for.
    */
   var soundOpen = false;
 
@@ -606,22 +638,33 @@
     return Math.min(1, Math.max(0, n));
   }
 
-  function wireFader(inputId, outputId, key, fallback) {
+  function wireFader(inputId, outputId, key, apply) {
     var input = document.getElementById(inputId);
     var out = document.getElementById(outputId);
-    input.value = String(Math.round(volumeOf(key, fallback) * 100));
+    // Zero is the default, here and in audio.js. The two files say it
+    // separately on purpose: either one can be the one that fails to load, and
+    // neither may assume the other arrived.
+    input.value = String(Math.round(volumeOf(key, 0) * 100));
     out.textContent = input.value;
-    // `input`, not `change`: the number should follow the thumb, which is the
-    // only feedback this panel can honestly give until there is something to
-    // hear.
+    // `input`, not `change`: the level follows the thumb, so you hear where
+    // you are while you are still dragging.
     input.addEventListener('input', function () {
       out.textContent = input.value;
-      storeSet(key, String(Number(input.value) / 100));
+      var level = Number(input.value) / 100;
+      // Written here as well as in audio.js — the same key and the same
+      // value, so the panel still remembers a level on a device where the
+      // audio never loaded.
+      storeSet(key, String(level));
+      if (audio) apply(level);
     });
   }
 
-  wireFader('vol-music', 'vol-music-out', KEY_VOL_MUSIC, 0.6);
-  wireFader('vol-sfx', 'vol-sfx-out', KEY_VOL_SFX, 0.8);
+  wireFader('vol-music', 'vol-music-out', KEY_VOL_MUSIC, function (level) {
+    audio.setMusicVolume(level);
+  });
+  wireFader('vol-sfx', 'vol-sfx-out', KEY_VOL_SFX, function (level) {
+    audio.setSfxVolume(level);
+  });
 
   function openSound() {
     soundOpen = true;
