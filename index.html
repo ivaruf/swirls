@@ -73,37 +73,29 @@
       opacity: 1;
     }
 
-    #next, #gear {
+    /* ---- the two arrows, bottom right -------------------------------------
+       There was one, and a gear beside it opening the effect menu. The gear
+       is gone — three bars in the corner are the menu now, and nothing should
+       be in two places — so its spot is where the BACKWARD arrow went. You
+       can step either way along the twelve without opening anything.
+
+       They are peers, so they are one size, and that is a fixed box rather
+       than padding around a glyph: ‹ and › do not have the same advance width
+       in any font, so `padding: 8px 14px` on both would have come out as two
+       buttons of two widths sitting next to each other. The flex row gives
+       them one gap as well, the same way #corner-tools does above. */
+    #cast-tools {
       position: fixed;
+      z-index: 30;
       bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-      display: block;
-      background: none;
-      border: none;
-      margin: 0;
-      color: #fff;
-      opacity: 0.4;
-      line-height: 1;
-      cursor: pointer;
-      transition: opacity 0.3s ease;
-      -webkit-tap-highlight-color: transparent;
-    }
-
-    #next {
       right: calc(8px + env(safe-area-inset-right, 0px));
-      padding: 8px 14px;
+      display: flex;
+      gap: 6px;
+    }
+
+    .arrow {
       font-size: 26px;
-    }
-
-    #gear {
-      right: calc(52px + env(safe-area-inset-right, 0px));
-      padding: 12px;
-      z-index: 30; /* above the open menu so it can toggle it closed */
-    }
-
-    #gear svg { display: block; }
-
-    @media (hover: hover) {
-      #next:hover, #gear:hover { opacity: 0.8; }
+      line-height: 1;
     }
 
     #menu {
@@ -112,7 +104,11 @@
       left: 0;
       width: 100%;
       height: 100%;
-      z-index: 20;
+      /* Above the title screen (50), because the panel now holds the two
+         volumes and the way out as well as the effects, and all three are
+         wanted before anything has been cast. #corner-tools sits above this
+         in turn, so the plate that opened it can close it again. */
+      z-index: 70;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -127,15 +123,25 @@
       visibility: visible;
     }
 
+    /* THE ONE PANEL. Three blocks down one column: the twelve effects, the
+       two volumes, the way out. There were two panels until this release —
+       this one and a #sound overlay behind a speaker in the corner — which
+       was two doors into the same drawer.
+
+       `width` subtracts the safe-area insets as well as the margin, because
+       sideways on a notched phone those are 44px a side and a panel sized off
+       bare vw runs underneath them. */
     #menu-panel {
       box-sizing: border-box;
-      width: min(320px, calc(100vw - 24px));
+      width: min(340px, calc(100vw - 24px
+                 - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
       max-height: calc(100vh - 24px);
+      /* The safety net, not the plan — see the landscape block at the foot of
+         this stylesheet, which is what actually keeps this off the scroll. */
       overflow-y: auto;
       padding: 14px;
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 8px;
+      gap: 10px;
       background: rgba(8, 10, 13, 0.82);
       -webkit-backdrop-filter: blur(14px);
       backdrop-filter: blur(14px);
@@ -143,16 +149,28 @@
       border-radius: 14px;
     }
 
+    #menu-panel:focus { outline: none; }
+
+    /* Four across and three down rather than the three across it was. Twelve
+       thumbnails used to be the whole panel and could afford four rows of
+       them; they now share it with two faders and an exit, so the grid gives
+       back the height by spending width it has. */
+    #menu-effects {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+
     .menu-cell {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 7px;
+      gap: 5px;
       margin: 0;
-      padding: 7px 7px 9px;
+      padding: 4px 4px 6px;
       background: none;
       border: 1px solid transparent;
-      border-radius: 10px;
+      border-radius: 9px;
       font-family: inherit;
       color: rgba(255, 255, 255, 0.8);
       opacity: 0.6;
@@ -170,8 +188,7 @@
        case and unhurried like everything else here; it is a way out, not a
        decision the panel wants to push you towards. */
     .menu-exit {
-      grid-column: 1 / -1;
-      margin: 6px 0 0;
+      margin: 0;
       padding: 11px 7px 4px;
       background: none;
       border: 0;
@@ -208,7 +225,9 @@
     .menu-cell span {
       font-size: 9px;
       line-height: 1.4;
-      letter-spacing: 0.18em;
+      /* Looser than this and "firefly meadow" needs three lines in a column
+         this narrow, which would set the height of every row in the grid. */
+      letter-spacing: 0.1em;
       text-transform: lowercase;
       text-align: center;
     }
@@ -368,21 +387,37 @@
       .title-exit:hover:not(:disabled) { color: rgba(255, 255, 255, 0.8); }
     }
 
-    /* ---- the corner: sound and fullscreen ----------------------------------
-       Above the title screen, so both icons are reachable while it is still
-       up — filling the screen is a thing you might want to do BEFORE
-       beginning, not only after. Top right is free: swirls' own two controls,
-       the gear and the next arrow, have always lived along the bottom edge,
-       so this cluster never has to argue with them for a corner. */
+    /* ---- the corner: menu, mute, fullscreen --------------------------------
+       Three plates, reading left to right, so fullscreen is the one in the
+       actual corner. Arbitrary, and meant to be: it only has to be the same
+       in every cabinet, and it is the hub's order now.
+
+       ON EVERY SCREEN, above the title screen included — filling the screen
+       and silencing the room are both things you might want to do BEFORE
+       beginning. Top right is free here: swirls' own controls, the arrows,
+       have always lived along the bottom edge, so this cluster never has to
+       argue with them for a corner.
+
+       The three are three kinds of thing and that is the whole shape.
+       Fullscreen changes the window, mute changes the sound, and only the
+       menu touches the piece — it is the one that opens a door. */
     #corner-tools {
       position: fixed;
-      z-index: 60;
+      /* Above #menu (70), so the plate that opened the panel can close it
+         again and mute stays live while it is up. */
+      z-index: 80;
       top: calc(8px + env(safe-area-inset-top, 0px));
       right: calc(8px + env(safe-area-inset-right, 0px));
       display: flex;
-      gap: 2px;
+      gap: 6px;
     }
 
+    /* ONE PLATE, FIVE BUTTONS. The corner's three and the two arrows along the
+       bottom all wear it: a disc of the panel's own surface, the same frosting
+       and the same hairline, so the chrome of this game reads as one set
+       rather than as a ring here and a bare glyph there. Dark and low
+       contrast on purpose — swirls is a thing you watch, and its controls
+       should be findable without ever being the brightest thing on screen. */
     .icon-button {
       width: 44px;
       height: 44px;
@@ -391,13 +426,15 @@
       justify-content: center;
       margin: 0;
       padding: 0;
-      background: none;
-      border: none;
+      background: rgba(8, 10, 13, 0.55);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.07);
       border-radius: 50%;
-      color: #fff;
-      opacity: 0.4;
+      font-family: inherit;
+      color: rgba(255, 255, 255, 0.55);
       cursor: pointer;
-      transition: opacity 0.3s ease;
+      transition: color 0.3s ease, border-color 0.3s ease;
       -webkit-tap-highlight-color: transparent;
     }
 
@@ -409,13 +446,26 @@
     .icon-button svg { display: block; width: 22px; height: 22px; }
 
     .icon-button:focus-visible {
-      opacity: 1;
+      color: #fff;
       outline: 1px solid rgba(255, 255, 255, 0.5);
       outline-offset: 2px;
     }
 
     @media (hover: hover) {
-      .icon-button:hover { opacity: 0.8; }
+      .icon-button:hover {
+        color: rgba(255, 255, 255, 0.9);
+        border-color: rgba(255, 255, 255, 0.16);
+      }
+    }
+
+    /* The menu plate stays above the open panel and a second press shuts it,
+       so it carries the panel's state — aria-expanded, which is also what a
+       screen reader needs to hear. Lit while the panel is up, because a
+       control that is the only way back out should look like it is doing
+       something. */
+    #menu-open[aria-expanded="true"] {
+      color: rgba(255, 255, 255, 0.9);
+      border-color: rgba(255, 255, 255, 0.16);
     }
 
     /* One glyph or the other, never both, and aria-pressed is the single
@@ -425,45 +475,30 @@
     #screen-toggle[aria-pressed="true"] .icon-off { display: none; }
     #screen-toggle[aria-pressed="true"] .icon-on { display: block; }
 
-    /* ---- the sound panel ---------------------------------------------------
-       The same overlay language as the effect menu — dimmed backdrop, frosted
-       panel, one hairline — because they are the same kind of door. */
-    #sound {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 70;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(0, 0, 0, 0.45);
-      opacity: 0;
-      visibility: hidden;
-      transition: opacity 0.25s ease, visibility 0.25s ease;
+    /* The mute plate carries both its states in the one <svg> and lets this
+       pick between them off the same aria-pressed main.js writes the label
+       from — so what is engraved and what a screen reader hears cannot drift.
+       Muted takes the violet off the volume thumbs rather than going brighter:
+       this plate is lit because something is OFF, and the one other place in
+       swirls wearing that colour is the pair of faders behind the menu. */
+    .icon-button .icon-slash { display: none; }
+    #mute-toggle[aria-pressed="true"] .icon-waves { display: none; }
+    #mute-toggle[aria-pressed="true"] .icon-slash { display: block; }
+    #mute-toggle[aria-pressed="true"] { color: #A87CFF; }
+
+    /* ---- the sound half of the panel --------------------------------------
+       It was an overlay of its own behind a speaker in the corner until this
+       release. Two doors into the same drawer: the effects were behind one
+       and the levels behind the other, and a player looking for "the
+       settings" had to know which. One panel now, and this is the block
+       under the thumbnails. */
+    #menu-sound {
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
     }
 
-    #sound.open { opacity: 1; visibility: visible; }
-
-    #sound-panel {
-      box-sizing: border-box;
-      width: min(320px, calc(100vw - 24px));
-      max-height: calc(100vh - 24px);
-      overflow-y: auto;
-      padding: 18px 16px 12px;
-      background: rgba(8, 10, 13, 0.82);
-      -webkit-backdrop-filter: blur(14px);
-      backdrop-filter: blur(14px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 14px;
-      color: rgba(255, 255, 255, 0.8);
-    }
-
-    #sound-panel:focus { outline: none; }
-
-    #sound-title {
-      margin: 0 0 16px;
+    #menu-sound-title {
+      margin: 0 0 10px;
       font-size: 12px;
       font-weight: 400;
       letter-spacing: 0.3em;
@@ -546,47 +581,70 @@
     }
 
     .vol-note {
-      margin: 14px 0 0;
-      padding-top: 12px;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      margin: 8px 0 0;
       font-size: 12px;
       line-height: 1.6;
       color: rgba(255, 255, 255, 0.42);
     }
 
-    .panel-back {
-      display: block;
-      width: 100%;
-      margin: 10px 0 0;
-      padding: 11px 7px;
-      background: none;
-      border: 0;
-      font: inherit;
-      font-size: 13px;
-      letter-spacing: 0.02em;
-      color: rgba(255, 255, 255, 0.5);
-      cursor: pointer;
-      transition: color 0.25s ease;
-      -webkit-tap-highlight-color: transparent;
-    }
-
-    @media (hover: hover) {
-      .panel-back:hover { color: rgba(255, 255, 255, 0.8); }
-    }
-
     /* A phone on its side is 300–430px tall and a browser toolbar can take
        fifty of those, so what runs off the bottom is whatever is last in the
-       column — which here is the way out. The mark is the one thing on this
-       screen that can afford to lose height, so it is what gives it up. */
+       column — which here is the way out.
+       maxgear's shape, laid over the existing markup by grid AREA: nothing
+       moves in the body below, portrait is untouched, and a tablet — taller
+       than 500px whichever way up — keeps the stacked panel. */
     @media (orientation: landscape) and (max-height: 500px) {
       #splash-mark { width: 60px; height: 60px; margin-bottom: 16px; }
       #title-actions { margin-top: 18px; }
       .title-go { padding: 10px 24px; }
-      #sound-panel { padding: 14px 16px 10px; }
-      #sound-title { margin-bottom: 10px; }
+
+      /* THE PANEL IS THE REAL RISK IN THIS GAME and this block is the answer.
+         Twelve thumbnails, two faders and a way out is the tallest thing
+         swirls has ever put on screen — as one column it is ~620px, which is
+         twice a sideways phone. A sideways phone has width where it lacks
+         height, so it spends width: the effects take a column of their own
+         SIX across and two down, and the two levels and the exit stack beside
+         them. That is ~205px of content, which clears a 300px viewport with
+         the panel's own margin left over. */
+      #menu-panel {
+        width: min(660px, calc(100vw - 24px
+                   - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+        grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+        grid-template-areas:
+          "effects sound"
+          "effects exit";
+        align-content: start;
+        gap: 8px 14px;
+        padding: 12px;
+      }
+      /* align-self, because this cell spans both rows and the column beside it
+         is the taller of the two — without it the thumbnail rows stretch to
+         match and every cell grows a band of empty space under its name. */
+      #menu-effects {
+        grid-area: effects;
+        align-self: start;
+        grid-template-columns: repeat(6, 1fr);
+      }
+      /* The hairline separated two blocks in a stack; sideways they are two
+         columns and it would cap one of them for no reason. */
+      #menu-sound { grid-area: sound; padding-top: 0; border-top: 0; }
+      /* The exit is built by main.js and appended last, so it would otherwise
+         auto-place into the effects column on top of a row of thumbnails.
+         It names its cell, like every other block here. */
+      .menu-exit { grid-area: exit; align-self: end; }
+
+      /* A sixth of 370px is a 48px thumbnail, and "firefly meadow" wants
+         three lines at the portrait tracking — which would set the height of
+         both rows. The name is the caption under a picture that already says
+         which one it is, so it is the thing that gives up the room. */
+      .menu-cell span { font-size: 8px; letter-spacing: 0.06em; }
+
+      #menu-sound-title { margin-bottom: 8px; padding-top: 6px; }
       .vol-row { margin-bottom: 4px; }
+      /* Thirty, and no lower: this query only ever fires on a phone, where a
+         finger is still the pointer. */
       .vol-row input[type="range"] { height: 30px; }
-      .vol-note { margin-top: 10px; padding-top: 9px; line-height: 1.5; }
+      .vol-note { margin-top: 6px; line-height: 1.5; }
     }
 
     @keyframes splash-spin {
@@ -614,48 +672,117 @@
 <body>
   <canvas id="c"></canvas>
   <div id="label"></div>
-  <div id="hint">tap or drag to cast &middot; hold to charge &middot; &rsaquo; changes mode</div>
-  <button id="next" type="button" aria-label="next effect">&rsaquo;</button>
-  <button id="gear" type="button" aria-label="effect menu">
-    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
-      <circle cx="10" cy="10" r="4.5"/>
-      <circle cx="10" cy="10" r="1.5"/>
-      <line x1="15.5" y1="10" x2="17.5" y2="10"/>
-      <line x1="13.89" y1="13.89" x2="15.3" y2="15.3"/>
-      <line x1="10" y1="15.5" x2="10" y2="17.5"/>
-      <line x1="6.11" y1="13.89" x2="4.7" y2="15.3"/>
-      <line x1="4.5" y1="10" x2="2.5" y2="10"/>
-      <line x1="6.11" y1="6.11" x2="4.7" y2="4.7"/>
-      <line x1="10" y1="4.5" x2="10" y2="2.5"/>
-      <line x1="13.89" y1="6.11" x2="15.3" y2="4.7"/>
-    </svg>
-  </button>
+  <div id="hint">tap or drag to cast &middot; hold to charge &middot; &lsaquo; &rsaquo; change mode</div>
+
+  <!--
+    BOTH WAYS ALONG THE TWELVE, without opening anything. There was one arrow
+    and a gear beside it; the gear's job belongs to the menu plate in the
+    corner now, and its place along the bottom edge belongs to the arrow that
+    goes the other way.
+
+    Both call main.js's switchEffect, which is the same path ArrowLeft and
+    ArrowRight already took — so a press of either dismisses the first-run
+    hint and sounds the mode cue exactly as a keystroke does.
+  -->
+  <div id="cast-tools">
+    <button id="prev" type="button" class="icon-button arrow" aria-label="previous effect" title="previous effect">&lsaquo;</button>
+    <button id="next" type="button" class="icon-button arrow" aria-label="next effect" title="next effect">&rsaquo;</button>
+  </div>
+
+  <!--
+    THE ONE PANEL, behind the menu plate in the corner. There were two until
+    this release: this grid of effects, opened by a gear at the bottom right,
+    and a #sound overlay of two faders opened by a speaker at the top right.
+    Two doors into the same drawer, and a player looking for "the settings"
+    had to already know which one held what.
+
+    In order: every effect as a live portrait, so you can JUMP rather than
+    step; the two levels; the way out of swirls. The exit is appended by
+    main.js, and only when the arcade's exit.js has answered AND has somewhere
+    to send us — see makeExitButton, which asks framed()/standalone() for a
+    reason worth reading before changing.
+
+    NO CLOSE BUTTON, on purpose. The plate that opened it stays visible above
+    it and carries aria-expanded, tapping the dimmed backdrop closes, and so
+    does Escape — which is what this menu has always done. A fourth way out
+    would be a row of height on the one screen that has least to spare.
+  -->
   <div id="menu" aria-hidden="true">
-    <div id="menu-panel"></div>
+    <div id="menu-panel" role="dialog" aria-label="swirls menu" tabindex="-1">
+      <div id="menu-effects"></div>
+      <div id="menu-sound">
+        <h2 id="menu-sound-title">sound</h2>
+        <label class="vol-row" for="vol-music">
+          <span class="vol-label">music</span>
+          <input type="range" id="vol-music" min="0" max="100" step="1" value="0">
+          <output class="vol-out" id="vol-music-out" for="vol-music">0</output>
+        </label>
+        <label class="vol-row" for="vol-sfx">
+          <span class="vol-label">effects</span>
+          <input type="range" id="vol-sfx" min="0" max="100" step="1" value="0">
+          <output class="vol-out" id="vol-sfx-out" for="vol-sfx">0</output>
+        </label>
+        <!-- Both faders start at zero and that is the whole of the off switch:
+             swirls says nothing until one of them comes up, and until then it
+             has not even fetched a sound to say it with. The markup says 0 as
+             well as the script does, so the panel never flashes a level
+             nobody chose. -->
+        <p class="vol-note">swirls starts silent. bring music up for the theme,
+          effects up and every cast rings.</p>
+      </div>
+    </div>
   </div>
   <div id="error">no effects loaded</div>
 
   <!--
-    THE CORNER. Sound and fullscreen, as icons, top right — the shape fishtank
-    and neonfox arrived at, and for their reasons: neither belongs to a
-    particular effect, neither is a setting of the piece you are watching, and
-    a symbol survives being shrunk to a corner where a word does not.
+    THE CORNER: menu, mute, fullscreen — three plates, reading left to right,
+    with fullscreen outermost at the corner itself. fishtank's shape, the set
+    maxgear and neonfox arrived at from the other end, and the hub's order.
+    None of the three belongs to a particular effect, none is a setting of the
+    piece you are watching, and a symbol survives being shrunk to a corner
+    where a word does not.
 
-    Top right is free here. swirls' own two controls — the gear and the next
-    arrow — have always lived along the bottom edge, so this cluster can stay
-    on every screen without ever having to argue with them for the corner.
+    ON EVERY SCREEN, the title screen included — filling the screen and
+    silencing the room are both things you might want before beginning. Top
+    right is free here: swirls' own controls, the arrows, have always lived
+    along the bottom edge, so this cluster never has to argue for the corner.
 
-    Art carries the meaning, so both buttons carry a real aria-label and title,
-    and screen.js rewrites the fullscreen one as the state changes.
+    THE FIRST TWO ARE DIFFERENT IN KIND and that is the point of drawing them
+    side by side. The MENU plate opens the panel below — the effects, the two
+    levels, the way out. The MUTE plate touches nothing but the sound: one
+    press for silence, no panel opened, no focus moved, nothing about the
+    piece disturbed, mid-cast included. Somebody walking into the room is not
+    a reason to lose what is on screen. M does the same from the keyboard.
+
+    Art carries the meaning, so each button carries a real aria-label and
+    title. screen.js rewrites the fullscreen one as the state changes and
+    main.js rewrites mute's — a label is the only thing that can tell a
+    screen reader which way a toggle is pointing, and in both cases CSS swaps
+    the picture off the same aria-pressed, so the two cannot drift.
   -->
   <div id="corner-tools">
-    <button type="button" id="sound-open" class="icon-button" aria-label="sound" title="sound">
-      <!-- A speaker and two waves, and deliberately no slash: this one opens a
-           panel rather than muting anything. -->
+    <!-- THREE BARS AND NOT A GEAR. A gear says settings, and what opens behind
+         this holds the twelve effects and the way out of swirls as well. It
+         was a speaker until this release, when the faders stopped being a
+         door of their own and moved inside the one panel it opens. -->
+    <button type="button" id="menu-open" class="icon-button"
+            aria-expanded="false" aria-controls="menu-panel" aria-label="menu" title="menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 7h16M4 12h16M4 17h16"/>
+      </svg>
+    </button>
+    <!-- MUTE, and a toggle rather than a door. The two levels behind the menu
+         keep whatever they were set to while it is down — audio.js puts this
+         on a master gain ABOVE both of them, not a pair of zeroes written
+         over the mix — so unmuting gives back exactly what was set. -->
+    <button type="button" id="mute-toggle" class="icon-button"
+            aria-pressed="false" aria-label="mute" title="mute (m)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M11 5 6 9H3v6h3l5 4Z"/>
-        <path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>
+        <path class="icon-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>
+        <path class="icon-slash" d="m15.5 9.5 6 5m0-5-6 5"/>
       </svg>
     </button>
     <!-- Hidden until screen.js has confirmed this browser has element
@@ -671,36 +798,6 @@
         <path class="icon-on" d="M3 9h6V3M21 9h-6V3M3 15h6v6M21 15h-6v6"/>
       </svg>
     </button>
-  </div>
-
-  <!--
-    The sound panel. Two levels, kept in the same overlay language as the
-    effect menu it sits beside — the dimmed backdrop, the frosted panel, the
-    same hairline — because they are the same kind of door.
-
-    Both faders start at zero and that is the whole of the off switch: swirls
-    says nothing until one of them comes up, and until then it has not even
-    fetched a sound to say it with. The markup says 0 as well as the script
-    does, so the panel never flashes a level nobody chose.
-  -->
-  <div id="sound" aria-hidden="true">
-    <div id="sound-panel" role="dialog" aria-labelledby="sound-title" aria-modal="true" tabindex="-1">
-      <h2 id="sound-title">sound</h2>
-      <label class="vol-row" for="vol-music">
-        <span class="vol-label">music</span>
-        <input type="range" id="vol-music" min="0" max="100" step="1" value="0">
-        <output class="vol-out" id="vol-music-out" for="vol-music">0</output>
-      </label>
-      <label class="vol-row" for="vol-sfx">
-        <span class="vol-label">effects</span>
-        <input type="range" id="vol-sfx" min="0" max="100" step="1" value="0">
-        <output class="vol-out" id="vol-sfx-out" for="vol-sfx">0</output>
-      </label>
-      <p class="vol-note">swirls starts silent. bring music up for the theme —
-        it plays through, takes a breath, and begins again. bring effects up
-        and every cast rings.</p>
-      <button type="button" id="sound-back" class="panel-back">back</button>
-    </div>
   </div>
 
   <!--

@@ -1,6 +1,6 @@
 # swirls
 
-A meditative canvas toy. Five ambient effect modes, no dependencies, no build step.
+A meditative canvas toy. Twelve ambient effect modes, no dependencies, no build step.
 
 ## Run locally
 
@@ -35,18 +35,34 @@ conduct them.
 - **Drag** — paints a stream of small lives along your path.
 - **Hold** — the life grows and brightens under your finger, pulsing once
   fully charged. Release sends it off exactly as it grew.
-- **`›` button** (bottom-right) or **←/→/space** — change mode (nine species
-  of castable life, each with its own palette and character). The gear button
-  opens a menu with a live portrait of every species.
+- **`‹` and `›`** (bottom-right) or **←/→/space** — step back and forth
+  through the twelve species of castable life, each with its own palette and
+  character. Both buttons go through the same switch the keys do.
+- **`m`** or the mute plate (top right) — silence, and nothing else. It never
+  opens a panel, stops nothing, and gives the mix back exactly as it was set.
 
 Your last mode is remembered between visits.
 
+## The corner and the menu
+
+Three plates, top right: **menu, mute, fullscreen**, in that order, so
+fullscreen is the one in the actual corner. The menu plate — three bars, not a
+gear — opens the one panel this game has, holding a live portrait of every
+species so you can jump rather than step, the two volume levels, and the way
+back to the arcade. Tap the dimmed backdrop, press the plate again, or press
+Escape to close it.
+
+Sideways on a phone that panel becomes two columns rather than one: the twelve
+portraits six across and two down, the levels and the exit beside them. A
+menu that scrolls on a landscape phone loses whatever is last in the column,
+which is always the way out.
+
 ## Sound
 
-**Off by default.** Both levels in the sound panel (the speaker, top right)
-start at zero, and nothing is fetched until one of them comes up — a player who
-never opens the panel never hears swirls and never downloads a byte of it.
-Raising a slider is what turns that side on, and the level is remembered.
+**Off by default.** Both levels in the menu start at zero, and nothing is
+fetched until one of them comes up — a player who never opens the menu never
+hears swirls and never downloads a byte of it. Raising a slider is what turns
+that side on, and the level is remembered. Dragging either one lifts the mute.
 
 - **music** — the theme, a composed 3:39 piece. It plays through, takes a
   five-second breath, and begins again. It is not looped: it has a written

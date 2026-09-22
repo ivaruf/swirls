@@ -4,30 +4,32 @@
   var canvas = document.getElementById('c');
   var labelEl = document.getElementById('label');
   var hintEl = document.getElementById('hint');
+  var prevBtn = document.getElementById('prev');
   var nextBtn = document.getElementById('next');
-  var gearBtn = document.getElementById('gear');
   var menuEl = document.getElementById('menu');
   var menuPanel = document.getElementById('menu-panel');
+  var menuEffects = document.getElementById('menu-effects');
   var errorEl = document.getElementById('error');
   var splashEl = document.getElementById('splash');
   var titleActionsEl = document.getElementById('title-actions');
   var titleExitEl = document.getElementById('title-exit');
   var beginBtn = document.getElementById('begin');
-  var soundEl = document.getElementById('sound');
-  var soundPanel = document.getElementById('sound-panel');
-  var soundOpenBtn = document.getElementById('sound-open');
-  var soundBackBtn = document.getElementById('sound-back');
+  var menuOpenBtn = document.getElementById('menu-open');
+  var muteBtn = document.getElementById('mute-toggle');
 
   var effects = window.SwirlsEffects;
   if (!effects || !effects.length) {
     errorEl.classList.add('show');
     hideSplash();
-    // Nothing below this line runs, so the panel behind the speaker is never
-    // wired. Take the speaker away rather than leaving a button that answers
-    // to nothing on a screen that is already admitting something went wrong.
-    // The fullscreen icon beside it is unaffected: screen.js is its own file
-    // and does not care whether this one got anywhere.
-    soundOpenBtn.hidden = true;
+    // Nothing below this line runs, so the one panel is never wired — no
+    // thumbnails, no faders, no exit. Take its plate away rather than leave a
+    // button that answers to nothing on a screen already admitting something
+    // went wrong, and take the mute plate with it: the only way to raise a
+    // level was inside that panel, so there is nothing here left to silence.
+    // The fullscreen icon is unaffected: screen.js is its own file and does
+    // not care whether this one got anywhere.
+    menuOpenBtn.hidden = true;
+    muteBtn.hidden = true;
     return;
   }
 
@@ -402,23 +404,48 @@
 
   // ---- keyboard ---------------------------------------------------------------
 
+  /**
+   * A letter typed into a field is a letter, not a command.
+   *
+   * swirls has no text field today, which is exactly why this is written
+   * down rather than assumed: the day one arrives — a name, a seed, a room
+   * code — m would otherwise silence the game every time somebody typed a
+   * word with an m in it. Ranges, checkboxes and buttons are controls you
+   * press rather than fields you write in, so they still hear the shortcut,
+   * which matters because the mute plate itself keeps focus after a click.
+   */
+  function isTyping(target) {
+    if (!target) return false;
+    if (target.isContentEditable) return true;
+    if (target.tagName === 'TEXTAREA') return true;
+    if (target.tagName !== 'INPUT') return false;
+    return ['range', 'checkbox', 'radio', 'button', 'submit'].indexOf(target.type) < 0;
+  }
+
   window.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
-      if (soundOpen) {
-        e.preventDefault();
-        closeSound();
-      } else if (menuOpen) {
+      if (menuOpen) {
         e.preventDefault();
         closeMenu();
       }
       return;
     }
-    // Space and the arrows cast and switch, which is not what either open
-    // panel is for — and Space would otherwise both press the focused button
-    // and change the effect behind it. The title screen is deliberately NOT
-    // in this test: its one button answers to Space by itself, and an effect
+    // Mute is answered FIRST and from anywhere — panel up, panel down, a cast
+    // still in flight. It is the keyboard's half of the corner's mute plate
+    // and it must mean the same thing the plate does: silence, and nothing
+    // else moved.
+    if (e.key === 'm' || e.key === 'M') {
+      if (isTyping(e.target)) return;
+      e.preventDefault();
+      toggleMute();
+      return;
+    }
+    // Space and the arrows cast and switch, which is not what the open panel
+    // is for — and Space would otherwise both press the focused button and
+    // change the effect behind it. The title screen is deliberately NOT in
+    // this test: its one button answers to Space by itself, and an effect
     // quietly changing behind the curtain harms nothing.
-    if (soundOpen || menuOpen) return;
+    if (menuOpen) return;
     if (e.key === 'ArrowRight' || e.key === ' ' || e.code === 'Space') {
       e.preventDefault();
       switchEffect(1);
@@ -428,16 +455,27 @@
     }
   });
 
-  // ---- next button (mouse affordance) -----------------------------------------
+  // ---- the two arrows (pointer affordance) ------------------------------------
+  // Both go through switchEffect, which is the same function ArrowLeft and
+  // ArrowRight call — so a press dismisses the first-run hint and sounds the
+  // mode cue exactly as a keystroke does, and there is no second path that
+  // could quietly come to mean something else.
+
+  prevBtn.addEventListener('click', function () {
+    switchEffect(-1);
+    prevBtn.blur();
+  });
 
   nextBtn.addEventListener('click', function () {
     switchEffect(1);
     nextBtn.blur();
   });
 
-  // ---- effect menu (gear) -------------------------------------------------------
-  // A grid of all effects, each with a real portrait rendered at boot by
-  // running the effect briefly on a small offscreen canvas.
+  // ---- the menu -----------------------------------------------------------------
+  // Opened by the three bars in the corner, and it holds three things now: a
+  // grid of all effects, each with a real portrait rendered at boot by running
+  // the effect briefly on a small offscreen canvas; the two levels, which used
+  // to be an overlay of their own behind a speaker; and the way out of swirls.
 
   var menuOpen = false;
   var menuCells = [];
@@ -505,7 +543,10 @@
       if (audio) audio.mode();
       closeMenu();
     });
-    menuPanel.appendChild(cell);
+    // Into the effects block rather than straight into the panel: the panel
+    // is three blocks down one column now, and sideways it is a grid whose
+    // cells are named — an unplaced thumbnail would land on top of one.
+    menuEffects.appendChild(cell);
     return cell;
   }
 
@@ -532,12 +573,13 @@
   }
 
   /**
-   * A way out of swirls, under the effects and across the whole panel.
+   * A way out of swirls, at the foot of the panel under the two levels.
    *
-   * Only built when the arcade's exit.js actually answered. It is another
-   * repository's file and is allowed to be missing, and an exit that cannot
-   * exit is worse than none — so a swirls served on its own with /arcade/
-   * unreachable simply keeps the menu it has always had.
+   * Only built when the arcade's exit.js actually answered AND has somewhere
+   * to send us. It is another repository's file and is allowed to be missing,
+   * and an exit that cannot exit is worse than none — so a swirls served on
+   * its own with /arcade/ unreachable simply keeps the menu it has always
+   * had.
    *
    * Safe to read window.ArcadeExit here even though main.js is a classic
    * script at the end of the body and exit.js is deferred in the head: boot
@@ -546,7 +588,30 @@
    */
   function makeExitButton(className) {
     var exit = window.ArcadeExit;
+    // ONLY WHERE THERE IS SOMEWHERE TO GO: a launcher behind us, or an
+    // installed window that can genuinely close. Not the same question as
+    // whether quit() could do something — in a plain tab it could, because
+    // the arcade is a URL and a navigation always works, but somebody who
+    // typed this game's own address did not come from the arcade.
+    //
+    // ASKED THROUGH framed()/standalone() AND NOT THROUGH exit.js's own
+    // offers(), which says exactly this but is newer than both of them. The
+    // copy answering may be OLDER than this code — it is fetched from
+    // ../arcade/, and a service worker on this shared origin can hand back a
+    // version cached long before offers() was written — and a guard built on
+    // the new name fails CLOSED there: the way out silently disappears,
+    // inside the arcade, where it is the one control that matters. That cost
+    // maxgear a release.
+    //
+    // In a try, because this runs inside boot() — between the portrait pass
+    // and the first setEffect — and another repository's file throwing here
+    // would cost the whole game rather than one button.
     if (!exit) return null;
+    try {
+      if (!(exit.framed() || exit.standalone())) return null;
+    } catch (err) {
+      return null;
+    }
 
     var row = document.createElement('button');
     row.type = 'button';
@@ -600,18 +665,28 @@
     updateMenuHighlight();
     menuEl.classList.add('open');
     menuEl.setAttribute('aria-hidden', 'false');
+    menuOpenBtn.setAttribute('aria-expanded', 'true');
+    // Focus lands inside the thing that just appeared rather than staying on
+    // the body behind it; #menu-panel carries tabindex="-1" to receive it.
+    menuPanel.focus();
   }
 
   function closeMenu() {
     menuOpen = false;
     menuEl.classList.remove('open');
     menuEl.setAttribute('aria-hidden', 'true');
+    menuOpenBtn.setAttribute('aria-expanded', 'false');
+    menuOpenBtn.focus();
   }
 
-  gearBtn.addEventListener('click', function () {
+  // The plate sits above the open panel on purpose (see #corner-tools'
+  // z-index), so a second press is one of the three ways back out — the
+  // dimmed backdrop and Escape are the others. Deliberately no blur(): the
+  // plate is where focus belongs on the way out, and closeMenu puts it back
+  // there itself.
+  menuOpenBtn.addEventListener('click', function () {
     if (menuOpen) closeMenu();
     else openMenu();
-    gearBtn.blur();
   });
 
   // tap/click on the dimmed backdrop (outside the panel) closes the menu;
@@ -620,19 +695,68 @@
     if (e.target === menuEl) closeMenu();
   });
 
-  // ---- sound panel --------------------------------------------------------------
+  // ---- sound: two levels in the panel, and a mute of its own --------------------
 
   /**
    * Two levels, and now two things to apply them to.
    *
    * The day arrived: audio.js plays the theme against the music level and the
    * cast and mode cues against the effects one. Both still default to ZERO,
-   * which is the whole of "off by default" — a player who never opens this
-   * panel never hears swirls, and never downloads a byte of it either, because
+   * which is the whole of "off by default" — a player who never opens the
+   * menu never hears swirls, and never downloads a byte of it either, because
    * nothing is fetched until a level comes up. Raising a slider is what turns
-   * that side on, so there is no switch here to forget to look for.
+   * that side on, so there is no switch in the panel to forget to look for.
+   *
+   * MUTE IS A DIFFERENT QUESTION AND HAS ITS OWN PLATE. The levels are a mix,
+   * set once; mute is what you reach for when somebody walks into the room,
+   * and it must be one press with no panel in the way. audio.js has had the
+   * whole mechanism since the master gain went in — setMuted, muted, and
+   * swirls.muted.v1 behind them — and this file simply never called it. This
+   * is that wiring, and it is all of it: a plate, a keystroke, and the rule
+   * that dragging a fader lifts the mute.
    */
-  var soundOpen = false;
+  function paintMute(isMuted) {
+    var label = isMuted ? 'unmute' : 'mute';
+    muteBtn.setAttribute('aria-pressed', String(isMuted));
+    muteBtn.setAttribute('aria-label', label);
+    muteBtn.title = label + ' (m)';
+  }
+
+  function toggleMute() {
+    if (!audio) return;
+    audio.setMuted(!audio.muted);
+    paintMute(audio.muted);
+  }
+
+  /**
+   * Dragging either fader lifts the mute.
+   *
+   * A level silently cancelled by a control somewhere else is a level nobody
+   * can use: you drag it, nothing happens, and a plate in the opposite corner
+   * is the last place anyone thinks to look. Only a real drag comes through
+   * here — the boot restore in wireFader sets input.value directly and fires
+   * no `input` event, and putting a choice back is not itself a choice.
+   */
+  function liftMute() {
+    if (!audio || !audio.muted) return;
+    audio.setMuted(false);
+    paintMute(false);
+  }
+
+  if (audio) {
+    // A silent restore, before anything is drawn: whatever the plate was left
+    // on last session is what it opens on.
+    paintMute(audio.muted);
+    // NO blur() and no panel. One press, and the only thing in the game that
+    // changes is whether you can hear it — focus stays on the plate, which is
+    // also what keeps `m` working straight after a click.
+    muteBtn.addEventListener('click', toggleMute);
+  } else {
+    // audio.js is allowed to be missing (blocked, 404, no Web Audio at all).
+    // There is then nothing to silence, and a plate that answers to nothing is
+    // worse than one icon fewer in the corner.
+    muteBtn.hidden = true;
+  }
 
   function volumeOf(key, fallback) {
     var raw = storeGet(key);
@@ -667,38 +791,11 @@
 
   wireFader('vol-music', 'vol-music-out', KEY_VOL_MUSIC, function (level) {
     audio.setMusicVolume(level);
+    liftMute();
   });
   wireFader('vol-sfx', 'vol-sfx-out', KEY_VOL_SFX, function (level) {
     audio.setSfxVolume(level);
-  });
-
-  function openSound() {
-    soundOpen = true;
-    soundEl.classList.add('open');
-    soundEl.setAttribute('aria-hidden', 'false');
-    // Focus lands inside the thing that just appeared rather than staying on
-    // the body behind it; #sound-panel carries tabindex="-1" to receive it.
-    soundPanel.focus();
-  }
-
-  function closeSound() {
-    soundOpen = false;
-    soundEl.classList.remove('open');
-    soundEl.setAttribute('aria-hidden', 'true');
-    soundOpenBtn.focus();
-  }
-
-  soundOpenBtn.addEventListener('click', function () {
-    if (soundOpen) closeSound();
-    else openSound();
-  });
-
-  soundBackBtn.addEventListener('click', closeSound);
-
-  // Tap the dimmed backdrop to close, exactly as the effect menu does. The
-  // overlay sits above the canvas, so none of this ever casts a seed.
-  soundEl.addEventListener('click', function (e) {
-    if (e.target === soundEl) closeSound();
+    liftMute();
   });
 
   // ---- title screen --------------------------------------------------------------

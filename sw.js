@@ -5,7 +5,7 @@
    served while the download finishes in the background to refresh the
    cache for next launch. Requests with nothing cached wait indefinitely,
    since there is nothing to fall back to. */
-var CACHE = 'swirls-v9'; // a cue per effect, all in the theme's own key, and a master gain so mute can exist
+var CACHE = 'swirls-v10'; // three plates in the corner, one panel behind the first, and both arrows on the canvas
 var ANSWER_TIMEOUT = 3000;
 var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
