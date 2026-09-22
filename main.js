@@ -9,11 +9,11 @@
   var menuEl = document.getElementById('menu');
   var menuPanel = document.getElementById('menu-panel');
   var menuEffects = document.getElementById('menu-effects');
+  var ringNameEl = document.getElementById('ring-name');
   var errorEl = document.getElementById('error');
-  var splashEl = document.getElementById('splash');
-  var titleActionsEl = document.getElementById('title-actions');
-  var titleExitEl = document.getElementById('title-exit');
-  var beginBtn = document.getElementById('begin');
+  // The splash is looked up inside hideSplash() rather than held here: it is
+  // the one element that gets removed from the document, and a stale
+  // reference to a node nobody can see is a bug waiting to be written.
   var menuOpenBtn = document.getElementById('menu-open');
   var muteBtn = document.getElementById('mute-toggle');
 
@@ -479,6 +479,11 @@
 
   var menuOpen = false;
   var menuCells = [];
+  /* Has anybody picked yet? False for exactly as long as the ring is the
+   * title screen. It is what makes one panel serve two moments: while it is
+   * false the panel cannot be dismissed and a press begins the game, and once
+   * it is true the panel is an ordinary menu and a press changes the effect. */
+  var begun = false;
 
   var THUMB_RENDER = 240; // effects scale element counts by area, so render
                           // generously and let CSS scale the image down
@@ -516,10 +521,97 @@
     return tc.toDataURL('image/png');
   }
 
+  function effectName(index) {
+    var e = effects[index];
+    return (e && (e.name || e.id)) || 'effect ' + (index + 1);
+  }
+
+  /**
+   * PRESSING ONE OF THE TWELVE. It is the only interaction the ring has, and
+   * it does two different things depending on when it happens — which is the
+   * whole of what replaced the `begin` button.
+   *
+   * THE FIRST ONE BEGINS. The ring is the title screen, so the opening press
+   * is a player saying "this one, and start". Three things follow from that
+   * being a beginning rather than a change:
+   *
+   *   - no mode cue. That cue answers "the picture is about to change", and
+   *     this is the picture arriving. It would also be the very first sound
+   *     swirls ever made, over a theme that has not started, which is not how
+   *     this game introduces itself.
+   *   - the hint gets its one four-second showing HERE. It used to fire from
+   *     the `begin` handler and the reason is unchanged and still the trap:
+   *     shown at boot it would spend that single showing behind a screen
+   *     nobody can cast on and mark itself seen forever, so the one line
+   *     telling a first-time player how to cast would never be read.
+   *   - it must NOT dismiss the hint. Choosing where to start is not evidence
+   *     that anybody knows how to cast yet.
+   *
+   * EVERY ONE AFTER IT SWITCHES, which is what this always did: dismiss the
+   * hint, because using the ring is evidence enough, and sound the cue.
+   *
+   * Either way the effect is re-initialised. Beginning on the one already
+   * running is a clean start rather than a no-op, and that is the right
+   * reading of a press that says "start here".
+   */
+  function pick(index) {
+    var first = !begun;
+    begun = true;
+    setEffect(index);
+    if (first) {
+      // The plate has been hidden until now: a control whose whole job is to
+      // open and close this panel is a lie while the panel is the screen and
+      // cannot be closed. It is a real toggle from here on.
+      menuOpenBtn.hidden = false;
+      closeMenu();
+      showHintOnce();
+      return;
+    }
+    dismissHint();
+    // setEffect itself stays silent — boot calls it too, and swirls must not
+    // announce itself before anybody has asked it to.
+    if (audio) audio.mode();
+    closeMenu();
+  }
+
+  /* The word in the middle of the ring.
+   *
+   * Twelve names will not fit around a rim and trying is how a radial menu
+   * becomes unreadable, so the ring carries the pictures and the centre
+   * carries the word. It follows the POINTER and the FOCUS, not only the
+   * selection, which is what lets somebody walk round the ring and read where
+   * they are before committing to it — the whole reason the arrow keys do not
+   * select as they move. restoreRingName() puts the current effect back when
+   * nothing is being pointed at or focused. */
+  function showRingName(text) {
+    if (ringNameEl) ringNameEl.textContent = text;
+  }
+
+  function restoreRingName() {
+    showRingName(effectName(currentIndex));
+  }
+
   function makeCell(effect, index, thumb) {
     var cell = document.createElement('button');
     cell.type = 'button';
     cell.className = 'menu-cell';
+    var name = effect.name || effect.id || 'effect ' + (index + 1);
+    // The name is no longer drawn under each disc, so it has to be said here
+    // or the button has no accessible name at all — an <img alt=""> is not
+    // one. The centre of the ring is its visible half.
+    cell.setAttribute('role', 'radio');
+    cell.setAttribute('aria-checked', 'false');
+    cell.setAttribute('aria-label', name);
+    // Roving tabindex: exactly one cell is in the tab order and it is the
+    // current one. updateMenuHighlight resyncs this every time the panel
+    // opens, so a walk round the ring that ended somewhere else does not
+    // leave the tab stop stranded.
+    cell.tabIndex = -1;
+    // Where on the rim. Thirty degrees for twelve, and derived rather than
+    // written down so a thirteenth effect lands somewhere sensible instead of
+    // on top of the first. The RADIUS is tuned for twelve, though — see the
+    // ring's own comment in index.html before adding one.
+    cell.style.setProperty('--a', (index * (360 / effects.length)) + 'deg');
     var pic;
     if (thumb) {
       pic = document.createElement('img');
@@ -527,28 +619,52 @@
       pic.alt = '';
       pic.draggable = false;
     } else {
-      pic = document.createElement('div'); // portrait failed: plain dark square
+      pic = document.createElement('div'); // portrait failed: plain dark disc
     }
     pic.className = 'menu-thumb';
     cell.appendChild(pic);
-    var name = document.createElement('span');
-    name.textContent = effect.name || effect.id || 'effect ' + (index + 1);
-    cell.appendChild(name);
-    cell.addEventListener('click', function () {
-      dismissHint();
-      setEffect(index);
-      // The same cue the > gives, because it is the same event: the picture
-      // is about to change. setEffect itself stays silent — boot calls it too,
-      // and swirls must not announce itself before anybody has asked it to.
-      if (audio) audio.mode();
-      closeMenu();
-    });
-    // Into the effects block rather than straight into the panel: the panel
-    // is three blocks down one column now, and sideways it is a grid whose
-    // cells are named — an unplaced thumbnail would land on top of one.
+    cell.addEventListener('click', function () { pick(index); });
+    // Pointer events rather than mouseenter/mouseleave, which is the hub's
+    // base input primitive and means a tablet gets the name too — briefly,
+    // between the touch landing and the panel closing.
+    cell.addEventListener('pointerenter', function () { showRingName(name); });
+    cell.addEventListener('pointerleave', restoreRingName);
+    cell.addEventListener('focus', function () { showRingName(name); });
+    cell.addEventListener('blur', restoreRingName);
+    // Into the ring rather than straight into the panel, and AFTER the centre
+    // piece that index.html already put there — so document order is
+    // noon-then-clockwise and Tab walks the ring the way it is read.
     menuEffects.appendChild(cell);
     return cell;
   }
+
+  /* Arrow keys walk the rim, and deliberately do NOT select as they go.
+   *
+   * A radiogroup is usually allowed to select on arrow, but selecting here
+   * restarts the effect underneath — so moving across the ring with the keys
+   * would tear down and rebuild eleven scenes on the way past. Focus moves,
+   * the centre reads out where you are, and Space or Enter on the button is
+   * what commits. Home and End are noon and eleven o'clock. */
+  function focusCell(index) {
+    var n = menuCells.length;
+    if (!n) return;
+    var i = ((index % n) + n) % n;
+    for (var k = 0; k < n; k++) menuCells[k].tabIndex = (k === i) ? 0 : -1;
+    menuCells[i].focus();
+  }
+
+  menuEffects.addEventListener('keydown', function (e) {
+    var dir = 0;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') dir = 1;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') dir = -1;
+    else if (e.key === 'Home') { e.preventDefault(); focusCell(0); return; }
+    else if (e.key === 'End') { e.preventDefault(); focusCell(menuCells.length - 1); return; }
+    else return;
+    e.preventDefault();
+    var from = menuCells.indexOf(document.activeElement);
+    if (from < 0) from = currentIndex; // arrived by some other route
+    focusCell(from + dir);
+  });
 
   function buildMenu() {
     var thumbs = [];
@@ -641,23 +757,25 @@
     if (row) menuPanel.appendChild(row);
   }
 
-  /**
-   * The same way out, on the title screen, where someone who opened swirls
-   * from the arcade by mistake is most likely to want it. Built here rather
-   * than written into index.html for the same reason the menu's is: it is
-   * another repository's file that is allowed to be missing, and a door that
-   * cannot open is worse than no door.
-   */
-  function addTitleExit() {
-    var row = makeExitButton('title-exit');
-    if (row) titleExitEl.appendChild(row);
-  }
+  /* There was a second exit, built into the title screen, because the panel's
+   * one was two taps away behind a gear and somebody who opened swirls from
+   * the arcade by mistake should not have to go looking. The panel IS the
+   * title screen now, so its own exit is already the first thing on screen
+   * and a second copy would be the same door drawn twice. */
 
+  /* Which disc is lit, which one a screen reader calls checked, which one the
+   * tab stop is on, and what the middle of the ring says. All four are the
+   * same fact, so they are written in one place — the pictures, the label and
+   * the keyboard cannot drift apart. */
   function updateMenuHighlight() {
     for (var i = 0; i < menuCells.length; i++) {
-      if (i === currentIndex) menuCells[i].classList.add('current');
+      var on = (i === currentIndex);
+      if (on) menuCells[i].classList.add('current');
       else menuCells[i].classList.remove('current');
+      menuCells[i].setAttribute('aria-checked', String(on));
+      menuCells[i].tabIndex = on ? 0 : -1;
     }
+    restoreRingName();
   }
 
   function openMenu() {
@@ -671,7 +789,15 @@
     menuPanel.focus();
   }
 
+  /* THE ONE STATE THIS PANEL REFUSES TO LEAVE. Before the first pick the ring
+   * is the title screen, and every way out of a panel — Escape, the backdrop,
+   * the plate — would land the player on a canvas they have not started, with
+   * the door they just closed no longer drawn anywhere. So there is no way
+   * out of it except forward, through any one of the twelve. pick() sets
+   * `begun` before it calls this, which is why the opening press gets through
+   * and nothing else does. */
   function closeMenu() {
+    if (!begun) return;
     menuOpen = false;
     menuEl.classList.remove('open');
     menuEl.setAttribute('aria-hidden', 'true');
@@ -798,38 +924,39 @@
     liftMute();
   });
 
-  // ---- title screen --------------------------------------------------------------
+  // ---- the title screen, which is the ring ---------------------------------------
 
   /**
-   * The moment the splash stops being a curtain and becomes a door.
+   * The curtain comes down and the ring comes up. This is the title screen.
    *
-   * Called from boot(), once an effect is genuinely running on the canvas
-   * underneath — so what you are deciding to enter is already moving behind
-   * the wordmark. That is the whole argument for a title screen on a toy
-   * that used to start instantly: it shows you what swirls is before it asks
-   * whether you want in, and it gives the corner's two icons somewhere to be
-   * reached from before anything has happened.
+   * Called from boot() once an effect is genuinely running on the canvas
+   * underneath, which is the same argument the old title screen made and the
+   * reason the panel is frosted rather than opaque: what you are choosing
+   * between is already moving behind it. swirls shows you what it is before
+   * asking which one you want.
+   *
+   * There used to be a `begin` pill here and a second exit under it. Both are
+   * gone. The press that begins is the press that chooses, which is the
+   * decision anybody was going to make one tap later anyway — and a returning
+   * player needs no extra affordance for "the one I had last time", because
+   * setEffect has already lit it in the ring. That marking IS the resume
+   * button, which is why .menu-cell.current is drawn as loudly as it is.
    */
-  function armTitle() {
-    if (!splashEl) return;
-    addTitleExit();
-    titleActionsEl.hidden = false;
-    splashEl.classList.add('armed');
-    // It was aria-hidden while it was pure decoration over an empty canvas.
-    // It holds two real buttons now, and a screen reader has to be able to
-    // find them.
-    splashEl.setAttribute('aria-hidden', 'false');
-  }
-
-  beginBtn.addEventListener('click', function () {
-    splashEl.classList.remove('armed');
+  function openTitle() {
     hideSplash();
-    // The hint gets its one four-second showing HERE rather than at boot.
-    // Shown at boot it would have burnt that showing behind the title screen
-    // and marked itself seen, so the one line telling a first-time player how
-    // to cast would never have been read by anybody.
-    showHintOnce();
-  });
+    // Hidden rather than inert: the panel cannot be closed until somebody has
+    // picked (see closeMenu), and a plate whose only job is to open and close
+    // it would be a control that does nothing. pick() un-hides it.
+    menuOpenBtn.hidden = true;
+    openMenu();
+    // Focus goes to the ring rather than to the panel, which is the one place
+    // the two moments differ. Mid-watch the panel is a menu and you may have
+    // come for the faders, so focus lands on the dialog and Tab decides.
+    // Here the ring is the screen and the only way forward is through it, so
+    // a keyboard arrives already on the remembered effect: arrows walk the
+    // rim from there and Enter begins.
+    if (menuCells[currentIndex]) menuCells[currentIndex].focus();
+  }
 
   // ---- boot splash --------------------------------------------------------------
   // The splash is CSS-only and pointer-events:none for its whole life, so it
@@ -863,11 +990,12 @@
       }
     }
 
+    // The remembered effect, running before anybody has chosen — so the ring
+    // opens over a live piece rather than over black, and the disc it lights
+    // is the one already playing behind it.
     setEffect(initialIndex);
     start();
-    // Not hideSplash(): the splash arms into the title screen instead, and
-    // the hint waits for `begin` so it is not spent behind it.
-    armTitle();
+    openTitle();
   }
 
   // Two frames of headroom so the splash is actually on screen before

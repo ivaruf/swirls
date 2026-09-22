@@ -43,19 +43,38 @@ conduct them.
 
 Your last mode is remembered between visits.
 
-## The corner and the menu
+## Starting, and the ring
+
+**There is no start button.** swirls opens on its mark with the twelve species
+laid around it, thirty degrees apart, each one a live portrait of what it
+draws; the volume levels sit under the ring and the way back to the arcade
+under those. **Picking one is how swirls begins**, on that species. A returning
+visitor's last choice is already lit in the ring, so carrying on is a matter of
+pressing the one that is glowing.
+
+The ring is a real radiogroup of real buttons in clock order: Tab reaches it,
+the arrow keys walk the rim either way without committing, Home and End are
+noon and eleven o'clock, and Enter or Space picks. Twelve names will not fit
+around a rim, so the ring carries the pictures and the **centre carries the
+word** — it follows the pointer and the keyboard focus, not just the selection,
+so you can read where you are before choosing.
+
+Once you have begun, the same panel is the menu: the **menu plate** in the
+corner reopens it and picking a species switches to it. Before you have begun
+there is no way to dismiss it, because there would be nothing behind it to
+dismiss it onto.
+
+## The corner
 
 Three plates, top right: **menu, mute, fullscreen**, in that order, so
-fullscreen is the one in the actual corner. The menu plate — three bars, not a
-gear — opens the one panel this game has, holding a live portrait of every
-species so you can jump rather than step, the two volume levels, and the way
-back to the arcade. Tap the dimmed backdrop, press the plate again, or press
-Escape to close it.
+fullscreen is the one in the actual corner. The menu plate is three bars, not
+a gear, and it appears once you have begun. Tap the dimmed backdrop, press the
+plate again, or press Escape to close the panel.
 
-Sideways on a phone that panel becomes two columns rather than one: the twelve
-portraits six across and two down, the levels and the exit beside them. A
-menu that scrolls on a landscape phone loses whatever is last in the column,
-which is always the way out.
+Sideways on a phone the panel becomes two columns rather than one: the ring in
+its own column, the levels and the exit beside it. A menu that scrolls on a
+landscape phone loses whatever is last in the column, which is always the way
+out.
 
 ## Sound
 

@@ -151,37 +151,119 @@
 
     #menu-panel:focus { outline: none; }
 
-    /* Four across and three down rather than the three across it was. Twelve
-       thumbnails used to be the whole panel and could afford four rows of
-       them; they now share it with two faders and an exit, so the grid gives
-       back the height by spending width it has. */
+    /* ---- the ring ----------------------------------------------------------
+       The twelve effects laid around the mark, thirty degrees apart. It was a
+       four-by-three grid of thumbnails, which is a shape any application could
+       have; a ring around this particular logo could only be swirls. Twelve is
+       what makes it work — a clock face, no awkward remainder — and what makes
+       it honest is that everything in it is still a real button in document
+       order, so Tab walks the ring clockwise from noon and the arrow keys walk
+       it either way. Only the DRAWING is radial.
+
+       THE RADIUS COMES OUT OF THE TOUCH TARGET, not the other way round.
+       Adjacent cells sit 2R·sin(15°) apart on the rim, so the radius that
+       leaves twelve --cell discs a --gap between them is (cell+gap)/2·sin15°,
+       which is the calc below. Pick a diameter first and you find out
+       afterwards whether a finger fits. */
     #menu-effects {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 6px;
+      --cell: 48px;
+      --gap: 8px;
+      --ring: calc((var(--cell) + var(--gap)) / 0.5176);
+      position: relative;
+      width: calc(2 * var(--ring) + var(--cell));
+      height: calc(2 * var(--ring) + var(--cell));
+      margin: 0 auto;
     }
 
     .menu-cell {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: var(--cell);
+      height: var(--cell);
+      /* half the cell back, so `top/left: 50%` means its CENTRE is on the
+         container's centre before the transform carries it out to the rim. */
+      margin: calc(var(--cell) / -2) 0 0 calc(var(--cell) / -2);
+      padding: 0;
+      background: none;
+      border: 0;
+      border-radius: 50%;
+      /* the portraits are square; this is what makes them discs. swirls has no
+         straight line anywhere else in it. */
+      overflow: hidden;
+      font-family: inherit;
+      color: rgba(255, 255, 255, 0.8);
+      opacity: 0.55;
+      cursor: pointer;
+      transition: opacity 0.25s ease, box-shadow 0.25s ease;
+      -webkit-tap-highlight-color: transparent;
+      /* out to the rim at --a, then the same angle back: a portrait tipped a
+         hundred and fifty degrees is a portrait nobody can read. --a is
+         written per cell by makeCell. */
+      transform:
+        rotate(var(--a, 0deg))
+        translateY(calc(-1 * var(--ring)))
+        rotate(calc(-1 * var(--a, 0deg)));
+    }
+
+    /* A ring rather than a border, because a border would have to come out of
+       the cell's own width and every disc would be a different size to the
+       one beside it. An outer box-shadow is not clipped by the overflow
+       above, so it draws cleanly outside the disc.
+
+       LOUDER THAN A HIGHLIGHT USUALLY NEEDS TO BE, because this marking is
+       now doing a second job. The ring is the title screen, so the disc it
+       lights is the answer to "carry on with the one I had last time" — there
+       is no resume button and there should not be one, which means a returning
+       player has to be able to find their effect without looking for it. Halo
+       as well as ring: over twelve portraits that are themselves bright, a
+       thin hairline disappears. */
+    .menu-cell.current {
+      opacity: 1;
+      box-shadow:
+        0 0 0 2px rgba(255, 255, 255, 0.85),
+        0 0 16px rgba(255, 255, 255, 0.25);
+    }
+
+    .menu-cell:focus-visible {
+      opacity: 1;
+      outline: 2px solid rgba(255, 255, 255, 0.6);
+      outline-offset: 2px;
+    }
+
+    /* ---- the middle of the ring --------------------------------------------
+       The mark, and under it the name of whichever effect you are pointing at.
+       Twelve names will not fit around a rim and trying is how radial menus
+       become unreadable, so the ring carries the pictures and the centre
+       carries the word — which also gives the logo something to do besides
+       sit there.
+
+       It takes no pointer events at all: everything here is an echo of a
+       button on the rim, and a dead spot in the middle of a ring you are
+       reaching across would swallow presses meant for the far side. It is
+       aria-hidden for the same reason — a screen reader is already being told
+       the name of the button that has focus, and this would say it twice. */
+    #ring-centre {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: calc(2 * var(--ring) - var(--cell) - 16px);
+      transform: translate(-50%, -50%);
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 5px;
-      margin: 0;
-      padding: 4px 4px 6px;
-      background: none;
-      border: 1px solid transparent;
-      border-radius: 9px;
-      font-family: inherit;
-      color: rgba(255, 255, 255, 0.8);
-      opacity: 0.6;
-      cursor: pointer;
-      transition: opacity 0.25s ease;
-      -webkit-tap-highlight-color: transparent;
+      gap: 8px;
+      pointer-events: none;
+      text-align: center;
     }
 
-    .menu-cell.current {
-      opacity: 1;
-      border-color: rgba(255, 255, 255, 0.35);
+    #ring-name {
+      min-height: 1.4em;
+      font-size: 11px;
+      line-height: 1.4;
+      letter-spacing: 0.18em;
+      text-transform: lowercase;
+      color: rgba(255, 255, 255, 0.75);
     }
 
     /* Leaving swirls, across the foot of the panel and under a hairline. Lower
@@ -212,24 +294,16 @@
       .menu-cell:hover { opacity: 1; }
     }
 
+    /* The portraits are rendered square and fill the disc the cell already
+       clips them to. `div.menu-thumb` is makeCell's fallback when a portrait
+       threw — it gets the same disc, in the dark the effects are drawn on. */
     .menu-thumb {
       display: block;
       width: 100%;
-      border-radius: 7px;
+      height: 100%;
+      border-radius: 50%;
       background: #05080a;
       pointer-events: none;
-    }
-
-    div.menu-thumb { padding-top: 100%; }
-
-    .menu-cell span {
-      font-size: 9px;
-      line-height: 1.4;
-      /* Looser than this and "firefly meadow" needs three lines in a column
-         this narrow, which would set the height of every row in the grid. */
-      letter-spacing: 0.1em;
-      text-transform: lowercase;
-      text-align: center;
     }
 
     #error {
@@ -274,15 +348,23 @@
 
     #splash.gone { opacity: 0; }
 
-    #splash-mark {
+    /* THE MARK, DRAWN ONCE. It was #splash-mark and only ever appeared on the
+       title screen; the menu's ring stands the twelve effects around the same
+       drawing, so it is a class now and the two places that want it differ
+       only in --mark. A second hand-copied vortex would have been a second
+       thing to keep in step, and they would have drifted the first time
+       anybody touched a hue. */
+    .mark {
+      --mark: 92px;
       position: relative;
-      width: 92px;
-      height: 92px;
-      margin-bottom: 30px;
+      width: var(--mark);
+      height: var(--mark);
     }
 
+    #splash-mark { margin-bottom: 30px; }
+
     /* the seven arms, one hue per effect family */
-    #splash-mark::before {
+    .mark::before {
       content: '';
       position: absolute;
       top: 0;
@@ -300,20 +382,31 @@
       animation: splash-spin 3.8s linear infinite;
     }
 
-    /* the breathing core */
-    #splash-mark::after {
+    /* the breathing core. Sized off --mark rather than the 22px it used to be,
+       so the ring's smaller copy breathes in proportion instead of carrying a
+       core two-fifths of its own width. */
+    .mark::after {
       content: '';
       position: absolute;
       top: 50%;
       left: 50%;
-      width: 22px;
-      height: 22px;
-      margin: -11px 0 0 -11px;
+      width: calc(var(--mark) * 0.24);
+      height: calc(var(--mark) * 0.24);
+      margin: calc(var(--mark) * -0.12) 0 0 calc(var(--mark) * -0.12);
       border-radius: 50%;
       background: radial-gradient(circle,
         #fff 0%, #FFEFCF 42%, rgba(255, 214, 140, 0) 72%);
       animation: splash-breathe 2.6s ease-in-out infinite;
     }
+
+    #ring-mark { --mark: 64px; }
+
+    /* Nothing spins behind a closed door. The panel is only `visibility:
+       hidden` when shut, which does not stop an animation, and a conic
+       gradient repainting forever behind a menu nobody has opened is work the
+       effect on screen could be doing instead. */
+    #menu:not(.open) #ring-mark::before,
+    #menu:not(.open) #ring-mark::after { animation-play-state: paused; }
 
     #splash-word {
       font-size: 12px;
@@ -322,70 +415,18 @@
       color: rgba(255, 255, 255, 0.55);
     }
 
-    /* ---- the title's two doors ---------------------------------------------
-       Armed by main.js once an effect is actually running behind the screen.
-       Until that moment the splash is the curtain it has always been —
-       pointer-events:none — so a tap landing during boot is ignored rather
-       than pressing a button nothing has wired up yet. */
-    #splash.armed { pointer-events: auto; }
+    /* THERE IS NO `begin` BUTTON ANY MORE, and there are no styles here for
+       one. The splash used to ARM into a title screen — pointer events on, a
+       pill saying "begin", a way out underneath — and all of that is gone,
+       because the ring is the title screen now. You begin by choosing which
+       of the twelve to begin with, which is the decision anybody was going to
+       make one press later anyway; a door in front of it was a press that
+       asked nothing.
 
-    #title-actions {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 2px;
-      margin-top: 34px;
-      opacity: 0;
-      transition: opacity 0.7s ease;
-    }
-
-    #title-actions[hidden] { display: none; }
-    #splash.armed #title-actions { opacity: 1; }
-
-    .title-go {
-      min-width: 168px;
-      padding: 13px 26px;
-      background: none;
-      border: 1px solid rgba(255, 255, 255, 0.28);
-      border-radius: 999px;
-      font: inherit;
-      font-size: 14px;
-      letter-spacing: 0.3em;
-      /* letter-spacing hangs a gap off the last letter; put it back on the
-         front so the word sits centred in its own pill. */
-      text-indent: 0.3em;
-      color: rgba(255, 255, 255, 0.85);
-      cursor: pointer;
-      transition: border-color 0.25s ease, color 0.25s ease;
-      -webkit-tap-highlight-color: transparent;
-    }
-
-    @media (hover: hover) {
-      .title-go:hover { border-color: rgba(255, 255, 255, 0.55); color: #fff; }
-    }
-
-    /* The way out, under the door in. Same lower-case, unhurried voice as the
-       effect menu's own exit row: it is a way out, not a decision the screen
-       wants to push you towards. */
-    .title-exit {
-      margin: 6px 0 0;
-      padding: 11px 14px;
-      background: none;
-      border: 0;
-      font: inherit;
-      font-size: 13px;
-      letter-spacing: 0.02em;
-      color: rgba(255, 255, 255, 0.45);
-      cursor: pointer;
-      transition: color 0.25s ease;
-      -webkit-tap-highlight-color: transparent;
-    }
-
-    .title-exit:disabled { cursor: default; }
-
-    @media (hover: hover) {
-      .title-exit:hover:not(:disabled) { color: rgba(255, 255, 255, 0.8); }
-    }
+       So the splash is a curtain for its whole life again, exactly what it
+       was before the title screen existed: CSS that paints before a line of
+       script runs, pointer-events:none throughout, taken away by main.js the
+       moment the ring can be shown instead. */
 
     /* ---- the corner: menu, mute, fullscreen --------------------------------
        Three plates, reading left to right, so fullscreen is the one in the
@@ -587,6 +628,16 @@
       color: rgba(255, 255, 255, 0.42);
     }
 
+    /* A ring is a fixed block rather than something that reflows, so the one
+       width it cannot cope with is a phone narrower than itself. 264px of ring
+       inside a 296px panel is two pixels of slack a rounding error could eat,
+       so the oldest phones still in circulation get a smaller one. The radius
+       follows --cell on its own; nothing else here needs saying twice. */
+    @media (max-width: 359px) {
+      #menu-effects { --cell: 42px; --gap: 6px; }
+      #ring-mark { --mark: 56px; }
+    }
+
     /* A phone on its side is 300–430px tall and a browser toolbar can take
        fifty of those, so what runs off the bottom is whatever is last in the
        column — which here is the way out.
@@ -594,50 +645,54 @@
        moves in the body below, portrait is untouched, and a tablet — taller
        than 500px whichever way up — keeps the stacked panel. */
     @media (orientation: landscape) and (max-height: 500px) {
-      #splash-mark { width: 60px; height: 60px; margin-bottom: 16px; }
-      #title-actions { margin-top: 18px; }
-      .title-go { padding: 10px 24px; }
+      #splash-mark { --mark: 60px; margin-bottom: 16px; }
 
       /* THE PANEL IS THE REAL RISK IN THIS GAME and this block is the answer.
-         Twelve thumbnails, two faders and a way out is the tallest thing
-         swirls has ever put on screen — as one column it is ~620px, which is
-         twice a sideways phone. A sideways phone has width where it lacks
-         height, so it spends width: the effects take a column of their own
-         SIX across and two down, and the two levels and the exit stack beside
-         them. That is ~205px of content, which clears a 300px viewport with
-         the panel's own margin left over. */
+         A circle is height-hungry and a sideways phone is exactly what it has
+         least of: the ring, two faders and a way out stacked as one column is
+         well over 400px against a 300px viewport. A sideways phone has width
+         where it lacks height, so it spends width — the ring takes a column
+         of its own and the two levels and the exit stack beside it. */
       #menu-panel {
-        width: min(660px, calc(100vw - 24px
+        width: min(560px, calc(100vw - 24px
                    - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
-        grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+        /* `auto` and not a fraction. The ring is a fixed block now rather than
+           a grid that would spend whatever it was given, so a 1.6fr column
+           left it centred in a lake of empty space with the faders squeezed
+           beside it. The ring asks for exactly its own 208px; everything left
+           over goes to the column that can actually use width. */
+        grid-template-columns: auto minmax(0, 1fr);
         grid-template-areas:
           "effects sound"
           "effects exit";
         align-content: start;
-        gap: 8px 14px;
+        gap: 8px 18px;
         padding: 12px;
       }
       /* align-self, because this cell spans both rows and the column beside it
-         is the taller of the two — without it the thumbnail rows stretch to
-         match and every cell grows a band of empty space under its name. */
+         is the taller of the two — without it the ring's box stretches and the
+         circle stops being centred in what the eye reads as its own space. */
       #menu-effects {
         grid-area: effects;
         align-self: start;
-        grid-template-columns: repeat(6, 1fr);
+        /* THIRTY-EIGHT, AND NO LOWER. This query only ever fires on a phone,
+           where a finger is still the pointer, and it is the hub's floor. It
+           is also what decides the whole thing: twelve 38px discs 6px apart is
+           a 208px ring, which is the height of the column beside it, so the
+           panel comes out no taller than it was before the ring existed. */
+        --cell: 38px;
+        --gap: 6px;
       }
+      #ring-mark { --mark: 44px; }
+      #ring-centre { gap: 6px; }
+      #ring-name { font-size: 10px; letter-spacing: 0.12em; }
       /* The hairline separated two blocks in a stack; sideways they are two
          columns and it would cap one of them for no reason. */
       #menu-sound { grid-area: sound; padding-top: 0; border-top: 0; }
       /* The exit is built by main.js and appended last, so it would otherwise
-         auto-place into the effects column on top of a row of thumbnails.
-         It names its cell, like every other block here. */
+         auto-place into the effects column on top of the ring. It names its
+         cell, like every other block here. */
       .menu-exit { grid-area: exit; align-self: end; }
-
-      /* A sixth of 370px is a 48px thumbnail, and "firefly meadow" wants
-         three lines at the portrait tracking — which would set the height of
-         both rows. The name is the caption under a picture that already says
-         which one it is, so it is the thing that gives up the room. */
-      .menu-cell span { font-size: 8px; letter-spacing: 0.06em; }
 
       #menu-sound-title { margin-bottom: 8px; padding-top: 6px; }
       .vol-row { margin-bottom: 4px; }
@@ -657,7 +712,7 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-      #splash-mark::before, #splash-mark::after { animation: none; }
+      .mark::before, .mark::after { animation: none; }
     }
   </style>
 <!-- What quitting means here: back to the arcade when the arcade is what
@@ -696,11 +751,11 @@
     Two doors into the same drawer, and a player looking for "the settings"
     had to already know which one held what.
 
-    In order: every effect as a live portrait, so you can JUMP rather than
-    step; the two levels; the way out of swirls. The exit is appended by
-    main.js, and only when the arcade's exit.js has answered AND has somewhere
-    to send us — see makeExitButton, which asks framed()/standalone() for a
-    reason worth reading before changing.
+    In order: every effect as a live portrait, laid around the mark so you can
+    JUMP rather than step; the two levels; the way out of swirls. The exit is
+    appended by main.js, and only when the arcade's exit.js has answered AND
+    has somewhere to send us — see makeExitButton, which asks
+    framed()/standalone() for a reason worth reading before changing.
 
     NO CLOSE BUTTON, on purpose. The plate that opened it stays visible above
     it and carries aria-expanded, tapping the dimmed backdrop closes, and so
@@ -709,7 +764,20 @@
   -->
   <div id="menu" aria-hidden="true">
     <div id="menu-panel" role="dialog" aria-label="swirls menu" tabindex="-1">
-      <div id="menu-effects"></div>
+      <!--
+        THE RING. main.js appends the twelve effects after this centre piece,
+        so document order is noon-then-clockwise and Tab walks the ring the
+        way you read it. role=radiogroup because that is what it is: twelve
+        alternatives, one of them current, and the arrow keys move around it
+        without committing — the name under the mark previews where you are
+        and Space or Enter is what actually changes the piece.
+      -->
+      <div id="menu-effects" role="radiogroup" aria-label="effect">
+        <div id="ring-centre" aria-hidden="true">
+          <div id="ring-mark" class="mark"></div>
+          <div id="ring-name"></div>
+        </div>
+      </div>
       <div id="menu-sound">
         <h2 id="menu-sound-title">sound</h2>
         <label class="vol-row" for="vol-music">
@@ -801,26 +869,21 @@
   </div>
 
   <!--
-    The title screen, which is also the boot splash — one element, because the
-    mark and the wordmark were already drawn here and a second screen carrying
-    the same art would be a second thing to keep in step.
+    THE BOOT CURTAIN, and nothing more than that. It is CSS over an empty
+    canvas, drawn before a line of script has run, pointer-events:none for its
+    whole life so a tap landing during boot can never press something nothing
+    has wired up yet.
 
-    For its first two frames it is exactly what it always was: a cover over an
-    empty canvas, pointer-events:none so it can never swallow a cast. Once
-    main.js has an effect running underneath, it arms: the actions fade in, it
-    starts taking pointers, and it is a door rather than a curtain. The piece
-    is already moving behind it, which is the point — swirls shows you what it
-    is before asking whether you want in.
+    It used to become the title screen: main.js armed it, a `begin` pill faded
+    in and a way out appeared underneath. The ring is the title screen now
+    (#menu-panel, above) — main.js takes this away and opens that instead, so
+    the first thing a player touches is the choice of which effect to begin
+    with rather than a door in front of it. The mark survives the change in
+    both places; .mark is the one drawing and --mark is all that differs.
   -->
   <div id="splash" aria-hidden="true">
-    <div id="splash-mark"></div>
+    <div id="splash-mark" class="mark"></div>
     <div id="splash-word">swirls</div>
-    <div id="title-actions" hidden>
-      <button type="button" id="begin" class="title-go">begin</button>
-      <!-- Built by main.js only when the arcade's exit.js actually answered;
-           see addExitRow(). An exit that cannot exit is worse than none. -->
-      <div id="title-exit"></div>
-    </div>
   </div>
   <script src="effects.js"></script>
   <script src="screen.js" defer></script>

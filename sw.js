@@ -5,7 +5,7 @@
    served while the download finishes in the background to refresh the
    cache for next launch. Requests with nothing cached wait indefinitely,
    since there is nothing to fall back to. */
-var CACHE = 'swirls-v10'; // three plates in the corner, one panel behind the first, and both arrows on the canvas
+var CACHE = 'swirls-v11'; // the twelve laid round the mark, and choosing one is how swirls begins
 var ANSWER_TIMEOUT = 3000;
 var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
