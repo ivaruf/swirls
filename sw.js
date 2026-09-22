@@ -5,7 +5,7 @@
    served while the download finishes in the background to refresh the
    cache for next launch. Requests with nothing cached wait indefinitely,
    since there is nothing to fall back to. */
-var CACHE = 'swirls-v8'; // swirls has a voice: the theme and two cast cues, both levels still starting at zero
+var CACHE = 'swirls-v9'; // a cue per effect, all in the theme's own key, and a master gain so mute can exist
 var ANSWER_TIMEOUT = 3000;
 var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
@@ -23,11 +23,6 @@ var ASSETS = [
   // Same reasoning as screen.js: nothing imports audio.js either, so nothing
   // else would ever pull it into the cache on its behalf.
   './audio.js',
-  // The two cast cues are 18 and 26 KB. They are the sounds a player hears
-  // within a second of turning effects up, and they are small enough that
-  // precaching them costs nothing worth naming.
-  './audio/cast.m4a',
-  './audio/mode.m4a',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
@@ -35,16 +30,29 @@ var ASSETS = [
   './apple-touch-icon.png'
 ];
 
-// audio/theme.m4a is deliberately NOT in ASSETS. It is 2.6 MB against 405 KB
-// for everything listed above put together, and install blocks on every
-// entry in that list — so precaching it would stall each version bump behind a
-// download on whatever connection the player happens to be on, for a file most
-// players never ask for at all (music defaults to zero, and audio.js fetches
-// nothing until the slider comes up). maxgear hit exactly this and its sw.js
-// documents the same answer. The fetch handler below caches it on first play
-// instead, which costs one uncached launch of music and nothing else; it needs
-// no special case, because audio.js asks for it as a plain request and the
-// handler's own put() covers it.
+// NO AUDIO IS PRECACHED — not the theme, and not one of the fourteen cues.
+//
+// The theme first, because it made the argument: 2.6 MB against 374 KB for
+// everything listed above put together, and install blocks on every entry in
+// that list, so precaching it would stall each version bump behind a download
+// on whatever connection the player happens to be on. maxgear hit exactly this
+// and its sw.js documents the same answer.
+//
+// The cues then followed it out, and the reasoning is the same one scaled
+// down. A cue per effect is twelve files plus the mode cue: 179 KB, which
+// would be a 48% rise in what EVERY install downloads — including the installs
+// of the players who never turn sound on, which is all of them by default,
+// because both levels start at zero. Paying that on every version bump for a
+// feature nobody has asked for yet is the same mistake as the theme, only
+// quieter.
+//
+// What replaces it is better than precaching in both directions: audio.js
+// warms the whole cue set the moment the effects level first comes up, and the
+// fetch handler below puts each file in the cache as it arrives. Nobody pays
+// until they ask, and one online session with sound on leaves the complete set
+// available offline for good. It needs no special case here, because audio.js
+// asks for every file as a plain request and the handler's own put() covers
+// them all.
 
 self.addEventListener('install', function (e) {
   e.waitUntil(

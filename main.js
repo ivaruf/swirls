@@ -180,6 +180,11 @@
     var n = effects.length;
     currentIndex = ((index % n) + n) % n;
     current = effects[currentIndex];
+    // Each family has its own cue, so the sound follows the picture. Told
+    // here rather than at cast time because this is the only place the
+    // current effect changes, and because it lets the cue be fetched before
+    // the first cast rather than during it.
+    if (audio) audio.setFamily(current.id);
     env.t = 0;
     if (typeof current.init === 'function') {
       current.init(env);
@@ -282,8 +287,9 @@
 
   function castSeed(x, y, power, chargeLevel) {
     if (!current || typeof current.cast !== 'function') return;
-    // One chime per seed, at the seed's own weight, and pitched by how long
-    // the gesture was held. The charge is read live rather than taken from
+    // One cue per seed, in the voice of whatever family is on screen (see
+    // setEffect), at the seed's own weight, and pitched by how long the
+    // gesture was held. The charge is read live rather than taken from
     // chargeLevel: a tap released mid-charge passes 0 to the effect (that is
     // the existing contract and not this file's to change), but the hold did
     // happen, and the sound is allowed to know it. Audio only — nothing here
