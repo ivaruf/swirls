@@ -19,9 +19,29 @@
       overflow: hidden;
       background: #000;
       overscroll-behavior: none;
+      /* A toy, not a document (hub CLAUDE.md §2). On a tablet a resting thumb
+         is a long press and a drag that starts on a family name or a panel
+         label is a text selection, so Safari highlights words and offers
+         Copy / Look Up over the swirl. Nothing selects and nothing opens a
+         callout; `manipulation` drops double-tap zoom. The canvas below goes
+         further with touch-action:none, and touch-guard.js is the half CSS
+         is not honoured for everywhere. */
       -webkit-user-select: none;
       user-select: none;
+      -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    /* No text field ships today (the faders are ranges), but the day one
+       does it must be able to select what was typed in it. */
+    input,
+    textarea,
+    [contenteditable="true"] {
+      -webkit-user-select: text;
+      user-select: text;
+      -webkit-touch-callout: default;
     }
 
     #c {
@@ -721,6 +741,10 @@
      ours. Classic and deferred on purpose, so /arcade/ being unreachable
      costs the quit button rather than the whole page. -->
 <script src="../arcade/exit.js" defer></script>
+<!-- Selection and the long-press callout, cancelled outside a text field.
+     Classic, deferred and self-contained like screen.js: nothing else on
+     the page can take it down, and it can take nothing down. -->
+<script src="touch-guard.js" defer></script>
 <!-- The address change. Inert until gophercloud.games answers; see the file. -->
 <script src="moved.js" defer></script>
 </head>

@@ -5,7 +5,7 @@
    served while the download finishes in the background to refresh the
    cache for next launch. Requests with nothing cached wait indefinitely,
    since there is nothing to fall back to. */
-var CACHE = 'swirls-v11'; // the twelve laid round the mark, and choosing one is how swirls begins
+var CACHE = 'swirls-v12'; // a tablet stops treating swirls as text — no selection, no long-press callout, no double-tap zoom
 var ANSWER_TIMEOUT = 3000;
 var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
@@ -23,6 +23,9 @@ var ASSETS = [
   // Same reasoning as screen.js: nothing imports audio.js either, so nothing
   // else would ever pull it into the cache on its behalf.
   './audio.js',
+  // And touch-guard.js, for the same reason again: a classic script nothing
+  // imports.
+  './touch-guard.js',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
