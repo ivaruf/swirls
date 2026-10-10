@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="nb">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
@@ -578,8 +578,11 @@
       cursor: pointer;
     }
 
+    /* 64px, not the 56 it was: "effekter" is the longest caption in either
+       language and has to fit the gutter it shares with "musikk" and "språk",
+       or the controls beside them stop starting at one x. */
     .vol-label {
-      flex: 0 0 56px;
+      flex: 0 0 64px;
       color: rgba(255, 255, 255, 0.6);
     }
 
@@ -648,6 +651,67 @@
       color: rgba(255, 255, 255, 0.42);
     }
 
+    /* ---- the language row -------------------------------------------------
+       Two peers, so one size each (flex: 1 1 0, not auto — "English" is wider
+       than "Norsk" and auto would say it matters more). The panel's own
+       frosted plate and hairline, lower case like every word here, and the
+       chosen one lit the way the current disc in the ring is: brighter and
+       ringed, not filled. A hairline above, as the sound block has. */
+    #menu-lang {
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .lang-row { margin: 0; cursor: default; }
+
+    .lang-button {
+      flex: 1 1 0;
+      min-width: 0;
+      height: 38px;
+      margin: 0;
+      padding: 0 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: rgba(8, 10, 13, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 19px;
+      font: inherit;
+      font-size: 13px;
+      text-transform: lowercase;
+      color: rgba(255, 255, 255, 0.5);
+      cursor: pointer;
+      transition: color 0.25s ease, border-color 0.25s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .lang-button svg {
+      flex: 0 0 auto;
+      width: 22px;
+      height: 16px;
+      border-radius: 2px;
+      opacity: 0.6;
+      transition: opacity 0.25s ease;
+    }
+
+    .lang-button[aria-pressed="true"] {
+      color: rgba(255, 255, 255, 0.92);
+      border-color: rgba(255, 255, 255, 0.55);
+    }
+
+    .lang-button[aria-pressed="true"] svg { opacity: 1; }
+
+    .lang-button:focus { outline: none; }
+    .lang-button:focus-visible {
+      outline: 1px solid rgba(255, 255, 255, 0.5);
+      outline-offset: 2px;
+    }
+
+    @media (hover: hover) {
+      .lang-button:hover { color: rgba(255, 255, 255, 0.9); }
+    }
+
     /* A ring is a fixed block rather than something that reflows, so the one
        width it cannot cope with is a phone narrower than itself. 264px of ring
        inside a 296px panel is two pixels of slack a rounding error could eat,
@@ -684,6 +748,7 @@
         grid-template-columns: auto minmax(0, 1fr);
         grid-template-areas:
           "effects sound"
+          "effects lang"
           "effects exit";
         align-content: start;
         gap: 8px 18px;
@@ -709,6 +774,11 @@
       /* The hairline separated two blocks in a stack; sideways they are two
          columns and it would cap one of them for no reason. */
       #menu-sound { grid-area: sound; padding-top: 0; border-top: 0; }
+      /* The language row keeps its hairline sideways — it is the one line
+         separating it from the faders in the same column — but spends less
+         height above it. The buttons stay at 38, which is already the hub's
+         floor for a finger. */
+      #menu-lang { grid-area: lang; padding-top: 6px; }
       /* The exit is built by main.js and appended last, so it would otherwise
          auto-place into the effects column on top of the ring. It names its
          cell, like every other block here. */
@@ -735,6 +805,10 @@
       .mark::before, .mark::after { animation: none; }
     }
   </style>
+<!-- Which language, and every word swirls says. Synchronous and in the head
+     on purpose: it sets <html lang> before the first paint, and everything
+     below that speaks reads window.I18N. Classic, like everything else here. -->
+<script src="i18n.js"></script>
 <!-- What quitting means here: back to the arcade when the arcade is what
      framed us, closing the window when we are installed, and an honest note
      when we are a tab no script may close. It draws nothing — the button is
@@ -751,7 +825,7 @@
 <body>
   <canvas id="c"></canvas>
   <div id="label"></div>
-  <div id="hint">tap or drag to cast &middot; hold to charge &middot; &lsaquo; &rsaquo; change mode</div>
+  <div id="hint" data-i18n="hint">trykk eller dra for å trylle &middot; hold inne for å lade opp &middot; &lsaquo; &rsaquo; bytt virvel</div>
 
   <!--
     BOTH WAYS ALONG THE TWELVE, without opening anything. There was one arrow
@@ -764,8 +838,8 @@
     hint and sounds the mode cue exactly as a keystroke does.
   -->
   <div id="cast-tools">
-    <button id="prev" type="button" class="icon-button arrow" aria-label="previous effect" title="previous effect">&lsaquo;</button>
-    <button id="next" type="button" class="icon-button arrow" aria-label="next effect" title="next effect">&rsaquo;</button>
+    <button id="prev" type="button" class="icon-button arrow" data-i18n-label="prev" aria-label="forrige virvel" title="forrige virvel">&lsaquo;</button>
+    <button id="next" type="button" class="icon-button arrow" data-i18n-label="next" aria-label="neste virvel" title="neste virvel">&rsaquo;</button>
   </div>
 
   <!--
@@ -787,7 +861,7 @@
     would be a row of height on the one screen that has least to spare.
   -->
   <div id="menu" aria-hidden="true">
-    <div id="menu-panel" role="dialog" aria-label="swirls menu" tabindex="-1">
+    <div id="menu-panel" role="dialog" data-i18n-label="menu.dialog" aria-label="meny" tabindex="-1">
       <!--
         THE RING. main.js appends the twelve effects after this centre piece,
         so document order is noon-then-clockwise and Tab walks the ring the
@@ -796,21 +870,21 @@
         without committing — the name under the mark previews where you are
         and Space or Enter is what actually changes the piece.
       -->
-      <div id="menu-effects" role="radiogroup" aria-label="effect">
+      <div id="menu-effects" role="radiogroup" data-i18n-label="ring" aria-label="virvel">
         <div id="ring-centre" aria-hidden="true">
           <div id="ring-mark" class="mark"></div>
           <div id="ring-name"></div>
         </div>
       </div>
       <div id="menu-sound">
-        <h2 id="menu-sound-title">sound</h2>
+        <h2 id="menu-sound-title" data-i18n="sound">lyd</h2>
         <label class="vol-row" for="vol-music">
-          <span class="vol-label">music</span>
+          <span class="vol-label" data-i18n="music">musikk</span>
           <input type="range" id="vol-music" min="0" max="100" step="1" value="0">
           <output class="vol-out" id="vol-music-out" for="vol-music">0</output>
         </label>
         <label class="vol-row" for="vol-sfx">
-          <span class="vol-label">effects</span>
+          <span class="vol-label" data-i18n="effects">effekter</span>
           <input type="range" id="vol-sfx" min="0" max="100" step="1" value="0">
           <output class="vol-out" id="vol-sfx-out" for="vol-sfx">0</output>
         </label>
@@ -819,12 +893,53 @@
              has not even fetched a sound to say it with. The markup says 0 as
              well as the script does, so the panel never flashes a level
              nobody chose. -->
-        <p class="vol-note">swirls starts silent. bring music up for the theme,
-          effects up and every cast rings.</p>
+        <p class="vol-note" data-i18n="sound.note">swirls starter helt stille. skru opp musikk
+          for å høre melodien, og effekter for å høre hver gang du tryller.</p>
+      </div>
+      <!--
+        LANGUAGE, in the one panel — which is also the title screen, so the
+        row is reachable before anything has been cast as well as mid-watch
+        (hub CLAUDE.md §2, "Two languages, Norwegian first"). Laid out as a
+        .vol-row so its caption shares the faders' gutter and the two buttons
+        start at the same x as the two levels above them. Two equal buttons,
+        Norsk first, each its flag and its endonym in its own language.
+        i18n.js wires the clicks and writes aria-pressed; nothing here closes
+        the panel or touches the piece behind it.
+
+        The flags are kitchens' drawings, as they are. The Union Jack's
+        clipPath ids are page-global; this is the row's only copy, so they
+        carry a swirls prefix rather than a per-copy suffix.
+      -->
+      <div id="menu-lang">
+        <div class="vol-row lang-row" role="group" aria-labelledby="menu-lang-label">
+          <span class="vol-label" id="menu-lang-label" data-i18n="lang">språk</span>
+          <button type="button" class="lang-button" data-set-lang="nb" lang="nb" aria-pressed="true">
+            <svg viewBox="0 0 22 16" aria-hidden="true">
+              <rect width="22" height="16" fill="#ba0c2f"/>
+              <path d="M6 0h4v16H6zM0 6h22v4H0z" fill="#fff"/>
+              <path d="M7 0h2v16H7zM0 7h22v2H0z" fill="#00205b"/>
+            </svg>
+            <span>Norsk</span>
+          </button>
+          <button type="button" class="lang-button" data-set-lang="en" lang="en" aria-pressed="false">
+            <svg viewBox="0 0 60 30" aria-hidden="true">
+              <clipPath id="swirls-uk-clip"><path d="M0 0v30h60V0z"/></clipPath>
+              <clipPath id="swirls-uk-diag"><path d="M30 15h30v15zv15H0zH0V0zV0h30z"/></clipPath>
+              <g clip-path="url(#swirls-uk-clip)">
+                <path d="M0 0v30h60V0z" fill="#012169"/>
+                <path d="M0 0l60 30m0-30L0 30" stroke="#fff" stroke-width="6"/>
+                <path d="M0 0l60 30m0-30L0 30" clip-path="url(#swirls-uk-diag)" stroke="#c8102e" stroke-width="4"/>
+                <path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/>
+                <path d="M30 0v30M0 15h60" stroke="#c8102e" stroke-width="6"/>
+              </g>
+            </svg>
+            <span>English</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
-  <div id="error">no effects loaded</div>
+  <div id="error" data-i18n="error">fant ingen virvler</div>
 
   <!--
     THE CORNER: menu, mute, fullscreen — three plates, reading left to right,
@@ -858,7 +973,7 @@
          was a speaker until this release, when the faders stopped being a
          door of their own and moved inside the one panel it opens. -->
     <button type="button" id="menu-open" class="icon-button"
-            aria-expanded="false" aria-controls="menu-panel" aria-label="menu" title="menu">
+            aria-expanded="false" aria-controls="menu-panel" data-i18n-label="menu" aria-label="meny" title="meny">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M4 7h16M4 12h16M4 17h16"/>
@@ -869,7 +984,7 @@
          on a master gain ABOVE both of them, not a pair of zeroes written
          over the mix — so unmuting gives back exactly what was set. -->
     <button type="button" id="mute-toggle" class="icon-button"
-            aria-pressed="false" aria-label="mute" title="mute (m)">
+            aria-pressed="false" aria-label="slå av lyden" title="slå av lyden (m)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M11 5 6 9H3v6h3l5 4Z"/>
@@ -881,7 +996,7 @@
          fullscreen at all — iPhone Safari does not, and a button that does
          nothing when pressed is worse than no button. -->
     <button type="button" id="screen-toggle" class="icon-button"
-            aria-pressed="false" aria-label="fullscreen" title="fullscreen" hidden>
+            aria-pressed="false" aria-label="fullskjerm" title="fullskjerm" hidden>
       <!-- Four corners pushing out, and the same four pulled in for the
            pressed state. CSS shows one and hides the other. -->
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
@@ -909,6 +1024,9 @@
     <div id="splash-mark" class="mark"></div>
     <div id="splash-word">swirls</div>
   </div>
+  <!-- The stored language over the Norwegian in the markup, now — before the
+       long parse of effects.js gives the browser a chance to paint it. -->
+  <script>if (window.I18N) window.I18N.paintStatic(document);</script>
   <script src="effects.js"></script>
   <script src="screen.js" defer></script>
   <!-- Before main.js, which reads window.SwirlsAudio — and guarded there, so

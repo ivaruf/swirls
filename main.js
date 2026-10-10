@@ -17,6 +17,15 @@
   var menuOpenBtn = document.getElementById('menu-open');
   var muteBtn = document.getElementById('mute-toggle');
 
+  /* Every word this file says goes through i18n.js (window.I18N), a classic
+   * script loaded in <head> before this one. Guarded like audio.js is: a
+   * swirls that lost it shows the key rather than stopping, and the twelve
+   * names fall back to the English written on each effect. */
+  var I18N = window.I18N || null;
+  function t(key) {
+    return I18N ? I18N.t.apply(null, arguments) : key;
+  }
+
   var effects = window.SwirlsEffects;
   if (!effects || !effects.length) {
     errorEl.classList.add('show');
@@ -191,7 +200,7 @@
     if (typeof current.init === 'function') {
       current.init(env);
     }
-    showLabel(current.name || current.id || 'effect ' + (currentIndex + 1));
+    showLabel(effectName(currentIndex));
     storeSet(KEY_MODE, current.id);
     updateMenuHighlight();
   }
@@ -521,9 +530,17 @@
     return tc.toDataURL('image/png');
   }
 
+  /* An effect's name in the current language. The table in i18n.js is keyed
+   * by the effect's id, which never changes; the English `name` written on
+   * the effect itself is only the fallback for a swirls without i18n.js. */
   function effectName(index) {
     var e = effects[index];
-    return (e && (e.name || e.id)) || 'effect ' + (index + 1);
+    if (e && e.id && I18N) {
+      var key = 'fx.' + e.id;
+      var said = t(key);
+      if (said !== key) return said;
+    }
+    return (e && (e.name || e.id)) || t('effectN', index + 1);
   }
 
   /**
@@ -595,13 +612,12 @@
     var cell = document.createElement('button');
     cell.type = 'button';
     cell.className = 'menu-cell';
-    var name = effect.name || effect.id || 'effect ' + (index + 1);
     // The name is no longer drawn under each disc, so it has to be said here
     // or the button has no accessible name at all — an <img alt=""> is not
     // one. The centre of the ring is its visible half.
     cell.setAttribute('role', 'radio');
     cell.setAttribute('aria-checked', 'false');
-    cell.setAttribute('aria-label', name);
+    cell.setAttribute('aria-label', effectName(index));
     // Roving tabindex: exactly one cell is in the tab order and it is the
     // current one. updateMenuHighlight resyncs this every time the panel
     // opens, so a walk round the ring that ended somewhere else does not
@@ -627,9 +643,11 @@
     // Pointer events rather than mouseenter/mouseleave, which is the hub's
     // base input primitive and means a tablet gets the name too — briefly,
     // between the touch landing and the panel closing.
-    cell.addEventListener('pointerenter', function () { showRingName(name); });
+    // Asked for at the moment of pointing, not captured at build time, so a
+    // language switch reaches the centre of the ring as well as the label.
+    cell.addEventListener('pointerenter', function () { showRingName(effectName(index)); });
     cell.addEventListener('pointerleave', restoreRingName);
-    cell.addEventListener('focus', function () { showRingName(name); });
+    cell.addEventListener('focus', function () { showRingName(effectName(index)); });
     cell.addEventListener('blur', restoreRingName);
     // Into the ring rather than straight into the panel, and AFTER the centre
     // piece that index.html already put there — so document order is
@@ -735,22 +753,39 @@
     // Plain words, in swirls' lower case but not in its voice. A way out is
     // the one control someone reaches for having stopped wanting to watch,
     // and it should read as what it does rather than as another flourish.
-    row.textContent = exit.verb({
-      arcade: 'back to arcade',
-      app: 'close',
-      tab: 'close'
-    });
+    // verb() takes its words from us, so it is asked again in the current
+    // language every time the language changes — see paintExit.
+    var refused = false;
+    function paint() {
+      if (refused) {
+        row.textContent = t('exit.refused');
+        return;
+      }
+      try {
+        row.textContent = exit.verb({
+          arcade: t('exit.arcade'),
+          app: t('exit.close'),
+          tab: t('exit.close')
+        });
+      } catch (err) { /* keep whatever it last said */ }
+    }
+    paint();
+    paintExit = paint;
     row.addEventListener('click', function () {
       exit.quit().then(function (how) {
         // Refused: the browser will not close a tab it did not open. Say so
         // here, quietly, rather than leaving a control that does nothing.
         if (how !== 'refused') return;
-        row.textContent = 'close this tab yourself';
+        refused = true;
         row.disabled = true;
+        paint();
       });
     });
     return row;
   }
+
+  // Repaints the exit in the current language; a no-op until one is built.
+  var paintExit = function () {};
 
   function addExitRow() {
     var row = makeExitButton('menu-exit');
@@ -842,10 +877,10 @@
    * that dragging a fader lifts the mute.
    */
   function paintMute(isMuted) {
-    var label = isMuted ? 'unmute' : 'mute';
+    var label = isMuted ? t('mute.off') : t('mute.on');
     muteBtn.setAttribute('aria-pressed', String(isMuted));
     muteBtn.setAttribute('aria-label', label);
-    muteBtn.title = label + ' (m)';
+    muteBtn.title = t('mute.key', label);
   }
 
   function toggleMute() {
@@ -922,6 +957,30 @@
   wireFader('vol-sfx', 'vol-sfx-out', KEY_VOL_SFX, function (level) {
     audio.setSfxVolume(level);
     liftMute();
+  });
+
+  // ---- a language switch ----------------------------------------------------------
+  /**
+   * i18n.js has already repainted every [data-i18n] in the markup by the time
+   * this hears `arcade:lang`; what is left is what this file wrote itself.
+   * The twelve names (each disc's accessible name, the centre of the ring,
+   * the label that flashes on a switch), the mute plate and the exit.
+   *
+   * NOTHING ELSE MOVES. The panel stays open if it was, the piece behind it
+   * keeps running, focus stays on the button that was pressed — and the
+   * title screen stays the title screen, because `begun` is not touched.
+   */
+  document.addEventListener('arcade:lang', function () {
+    for (var i = 0; i < menuCells.length; i++) {
+      menuCells[i].setAttribute('aria-label', effectName(i));
+    }
+    // The centre follows whatever has focus, so a switch made from the
+    // language row (which has focus) puts the current effect back there.
+    var focused = menuCells.indexOf(document.activeElement);
+    showRingName(effectName(focused >= 0 ? focused : currentIndex));
+    if (current) labelEl.textContent = effectName(currentIndex);
+    if (audio) paintMute(audio.muted);
+    paintExit();
   });
 
   // ---- the title screen, which is the ring ---------------------------------------

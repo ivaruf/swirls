@@ -5,7 +5,7 @@
    served while the download finishes in the background to refresh the
    cache for next launch. Requests with nothing cached wait indefinitely,
    since there is nothing to fall back to. */
-var CACHE = 'swirls-v12'; // a tablet stops treating swirls as text — no selection, no long-press callout, no double-tap zoom
+var CACHE = 'swirls-v13'; // swirls speaks norsk first and english on request, switched live from the panel
 var ANSWER_TIMEOUT = 3000;
 var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
@@ -26,6 +26,9 @@ var ASSETS = [
   // And touch-guard.js, for the same reason again: a classic script nothing
   // imports.
   './touch-guard.js',
+  // i18n.js is loaded by index.html directly, so it has to be listed here
+  // like every other file the page cannot open without.
+  './i18n.js',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',

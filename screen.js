@@ -53,10 +53,20 @@
      Plain words, against this game's habit of speaking in lower case about
      casting and swirling. Fullscreen is not part of the fiction: it is a
      thing the browser does, it has one name everywhere, and the player
-     already knows it. */
+     already knows it.
+
+     Its own two words per language, because this file reads nothing from
+     i18n.js: it goes by <html lang>, which i18n.js sets before first paint,
+     and repaints when i18n.js announces a switch with `arcade:lang`. */
+  var WORDS = {
+    nb: ['fullskjerm', 'avslutt fullskjerm'],
+    en: ['fullscreen', 'exit fullscreen']
+  };
+
   function paint() {
     var active = isFullscreen();
-    var label = active ? 'exit fullscreen' : 'fullscreen';
+    var words = WORDS[document.documentElement.lang] || WORDS.nb;
+    var label = active ? words[1] : words[0];
     button.setAttribute('aria-pressed', String(active));
     button.setAttribute('aria-label', label);
     button.title = label;
@@ -78,4 +88,5 @@
 
   document.addEventListener('fullscreenchange', paint);
   document.addEventListener('webkitfullscreenchange', paint);
+  document.addEventListener('arcade:lang', paint);
 })();
