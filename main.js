@@ -605,10 +605,9 @@
     begun = true;
     setEffect(index);
     if (first) {
-      // The plate has been hidden until now: a control whose whole job is to
-      // open and close this panel is a lie while the panel is the screen and
-      // cannot be closed. It is a real toggle from here on.
-      menuOpenBtn.hidden = false;
+      // The plate has stood lit over the title screen until now, answering
+      // only by handing focus to the panel (see its click handler). It is a
+      // real toggle from here on.
       closeMenu();
       showHintOnce();
       return;
@@ -892,7 +891,11 @@
   // plate is where focus belongs on the way out, and closeMenu puts it back
   // there itself.
   menuOpenBtn.addEventListener('click', function () {
-    if (menuOpen) closeMenu();
+    // Before the first pick the panel is the title screen and closeMenu
+    // refuses to leave it, so the press brings the keyboard back into the
+    // panel instead of looking like it failed.
+    if (menuOpen && !begun) menuPanel.focus();
+    else if (menuOpen) closeMenu();
     else openMenu();
   });
 
@@ -1049,10 +1052,15 @@
    */
   function openTitle() {
     hideSplash();
-    // Hidden rather than inert: the panel cannot be closed until somebody has
-    // picked (see closeMenu), and a plate whose only job is to open and close
-    // it would be a control that does nothing. pick() un-hides it.
-    menuOpenBtn.hidden = true;
+    // THE PLATE STAYS, lit. It used to be hidden here, on the reasoning that
+    // a toggle for a panel that cannot be closed yet does nothing. The hub's
+    // corner rule (2026-10-11) outranks that: menu, mute, fullscreen on every
+    // screen, the same three in every cabinet, so the corner a player learns
+    // here is the corner in all the others. And it is not a lie — the panel
+    // behind it IS the menu and it IS open, which aria-expanded says and the
+    // lit plate shows. Pressing it before the first pick hands focus to the
+    // panel (see the click handler) rather than closing onto a canvas that
+    // has nothing on it and no door drawn anywhere.
     openMenu();
     // Focus goes to the ring rather than to the panel, which is the one place
     // the two moments differ. Mid-watch the panel is a menu and you may have

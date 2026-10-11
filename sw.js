@@ -5,7 +5,7 @@
    served while the download finishes in the background to refresh the
    cache for next launch. Requests with nothing cached wait indefinitely,
    since there is nothing to fall back to. */
-var CACHE = 'swirls-v14'; // one way out like every cabinet's: Back to arcade in sentence case with the hub's arrow, and Escape walks one step back
+var CACHE = 'swirls-v15'; // the menu plate stands in the corner on the title screen too: three plates on every screen, as in every cabinet
 var ANSWER_TIMEOUT = 3000;
 var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
