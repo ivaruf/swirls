@@ -5,7 +5,7 @@
    served while the download finishes in the background to refresh the
    cache for next launch. Requests with nothing cached wait indefinitely,
    since there is nothing to fall back to. */
-var CACHE = 'swirls-v15'; // the menu plate stands in the corner on the title screen too: three plates on every screen, as in every cabinet
+var CACHE = 'swirls-v16'; // precache reads past the browser's HTTP cache, so an update can never mix old and new files
 var ANSWER_TIMEOUT = 3000;
 var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
@@ -60,9 +60,14 @@ var ASSETS = [
 // asks for every file as a plain request and the handler's own put() covers
 // them all.
 
+// `cache: 'reload'` on everything the install stores. Without it the precache
+// reads through the browser's HTTP cache, which may still hold yesterday's copy
+// of a file, so a new version could be filed with some of the old files in it —
+// on 2026-10-11 dam_break ran a new screens.js against a stale sound.js and the
+// menu never wired up. The arcade learned this first (arcade/sw.js, `fresh`).
 self.addEventListener('install', function (e) {
   e.waitUntil(
-    caches.open(CACHE).then(function (cache) { return cache.addAll(ASSETS); })
+    caches.open(CACHE).then(function (cache) { return cache.addAll(ASSETS.map(function (url) { return new Request(url, { cache: 'reload' }); })); })
       .then(function () { return self.skipWaiting(); })
   );
 });
