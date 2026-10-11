@@ -286,28 +286,50 @@
       color: rgba(255, 255, 255, 0.75);
     }
 
-    /* Leaving swirls, across the foot of the panel and under a hairline. Lower
-       case and unhurried like everything else here; it is a way out, not a
-       decision the panel wants to push you towards. */
+    /* LEAVING SWIRLS: the hub's one button (CLAUDE.md §2, "One button, and it
+       looks and behaves the same in every game"). Last in the panel's column,
+       the column's full width, a little more air above it than the panel's
+       own 10px gap, and SECONDARY — which in swirls means the language
+       buttons' frosted pill and hairline ring, never anything lit, because
+       leaving is never what the panel recommends. The shared back arrow
+       before the words, and the words in sentence case: the one control in
+       swirls that is not lower case, on purpose. It used to be a bare line of
+       lower-case text under a hairline, which read as a footnote rather than
+       as a door. */
     .menu-exit {
-      margin: 0;
-      padding: 11px 7px 4px;
-      background: none;
-      border: 0;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      margin: 6px 0 0;
+      height: 40px;
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: rgba(8, 10, 13, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 20px;
       font: inherit;
       font-size: 13px;
       letter-spacing: 0.02em;
-      color: rgba(255, 255, 255, 0.5);
+      color: rgba(255, 255, 255, 0.7);
       cursor: pointer;
-      transition: color 0.25s ease;
+      transition: color 0.25s ease, border-color 0.25s ease;
       -webkit-tap-highlight-color: transparent;
     }
 
-    .menu-exit:disabled { cursor: default; }
+    .menu-exit-glyph { flex: 0 0 auto; width: 16px; height: 16px; }
+
+    .menu-exit:disabled { cursor: default; color: rgba(255, 255, 255, 0.4); }
+    .menu-exit:focus { outline: none; }
+    .menu-exit:focus-visible {
+      outline: 1px solid rgba(255, 255, 255, 0.5);
+      outline-offset: 2px;
+    }
 
     @media (hover: hover) {
-      .menu-exit:not(:disabled):hover { color: rgba(255, 255, 255, 0.9); }
+      .menu-exit:not(:disabled):hover {
+        color: rgba(255, 255, 255, 0.92);
+        border-color: rgba(255, 255, 255, 0.4);
+      }
     }
 
     @media (hover: hover) {

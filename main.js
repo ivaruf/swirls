@@ -431,12 +431,41 @@
     return ['range', 'checkbox', 'radio', 'button', 'submit'].indexOf(target.type) < 0;
   }
 
+  /* ESCAPE, ONE STEP BACK (hub CLAUDE.md §2, "Escape goes one step back, and
+   * from the start screen that step is the arcade"), in swirls' three moments:
+   *
+   *   the ring as TITLE SCREEN   -> the "Back to arcade" button, exactly as if
+   *     (open, nothing picked)      it were pressed, and only when it is
+   *                                 shown. The panel cannot be dismissed here
+   *                                 (see closeMenu), so the one step back
+   *                                 from it is out of the game.
+   *   the ring as MENU           -> closed; the piece carries on
+   *     (open, after a pick)
+   *   CASTING (panel down)       -> opens the menu. That is swirls' "in
+   *                                 play": a piece is running and the player
+   *                                 is casting into it. Nothing pauses,
+   *                                 because nothing here can be lost — the
+   *                                 piece keeps moving behind the frosted
+   *                                 panel, as it always has, and that is the
+   *                                 panel's whole look.
+   *
+   * Before the title screen arms (the splash's first frames) Escape does
+   * nothing: there is no panel and no door yet. There are no sub-panels —
+   * the sound and language rows live in the one panel.
+   *
+   * ONE PRESS, ONE ACTION: answered here and only here, preventDefault()ed,
+   * and returned from before the casting keys below can see it. Auto-repeat
+   * is ignored, so a held key cannot open and close the panel at the repeat
+   * rate — or close it and then leave. */
   window.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') {
-      if (menuOpen) {
-        e.preventDefault();
-        closeMenu();
-      }
+    if (e.key === 'Escape' || e.key === 'Esc') {
+      var act = null;
+      if (menuOpen && begun) act = closeMenu;
+      else if (menuOpen) act = quitExit;
+      else if (begun) act = openMenu;
+      if (!act) return;
+      e.preventDefault();
+      if (!e.repeat) act();
       return;
     }
     // Mute is answered FIRST and from anywhere — panel up, panel down, a cast
@@ -750,28 +779,37 @@
     var row = document.createElement('button');
     row.type = 'button';
     row.className = className;
-    // Plain words, in swirls' lower case but not in its voice. A way out is
-    // the one control someone reaches for having stopped wanting to watch,
-    // and it should read as what it does rather than as another flourish.
+    // THE HUB'S ONE BUTTON, and the one thing in swirls that is not in
+    // swirls' voice: the shared back arrow before the words, and the words in
+    // sentence case — "Back to arcade", not "back to arcade". Everything else
+    // here whispers in lower case and still does; this control is the same
+    // object in every cabinet (CLAUDE.md §2, "One button, and it looks and
+    // behaves the same in every game"), so a player who learned it next door
+    // finds it here without reading. The glyph is the hub's path, to the
+    // letter; its stroke and colour are ours, in the stylesheet.
+    row.innerHTML =
+      '<svg class="menu-exit-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
+      ' stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M19 12H5m6-6-6 6 6 6"/></svg><span class="menu-exit-label"></span>';
+    var label = row.lastChild;
     // verb() takes its words from us, so it is asked again in the current
     // language every time the language changes — see paintExit.
     var refused = false;
     function paint() {
       if (refused) {
-        row.textContent = t('exit.refused');
+        label.textContent = t('exit.refused');
         return;
       }
       try {
-        row.textContent = exit.verb({
+        label.textContent = exit.verb({
           arcade: t('exit.arcade'),
           app: t('exit.close'),
           tab: t('exit.close')
         });
       } catch (err) { /* keep whatever it last said */ }
     }
-    paint();
-    paintExit = paint;
-    row.addEventListener('click', function () {
+    function quit() {
+      if (row.disabled) return;
       exit.quit().then(function (how) {
         // Refused: the browser will not close a tab it did not open. Say so
         // here, quietly, rather than leaving a control that does nothing.
@@ -780,12 +818,20 @@
         row.disabled = true;
         paint();
       });
-    });
+    }
+    paint();
+    paintExit = paint;
+    quitExit = quit;
+    row.addEventListener('click', quit);
     return row;
   }
 
   // Repaints the exit in the current language; a no-op until one is built.
   var paintExit = function () {};
+  // Presses the exit — the button's own handler, so Escape on the title
+  // screen and a tap cannot do different things. Null until one is built,
+  // which is also how the Escape handler knows whether there is a door.
+  var quitExit = null;
 
   function addExitRow() {
     var row = makeExitButton('menu-exit');

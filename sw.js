@@ -5,7 +5,7 @@
    served while the download finishes in the background to refresh the
    cache for next launch. Requests with nothing cached wait indefinitely,
    since there is nothing to fall back to. */
-var CACHE = 'swirls-v13'; // swirls speaks norsk first and english on request, switched live from the panel
+var CACHE = 'swirls-v14'; // one way out like every cabinet's: Back to arcade in sentence case with the hub's arrow, and Escape walks one step back
 var ANSWER_TIMEOUT = 3000;
 var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
