@@ -5,7 +5,7 @@
    served while the download finishes in the background to refresh the
    cache for next launch. Requests with nothing cached wait indefinitely,
    since there is nothing to fall back to. */
-var CACHE = 'swirls-v16'; // precache reads past the browser's HTTP cache, so an update can never mix old and new files
+var CACHE = 'swirls-v17'; // the opening gets motion: intro.js winds the mark's light into the ring and lands it on the menu
 var ANSWER_TIMEOUT = 3000;
 var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
@@ -29,6 +29,8 @@ var ASSETS = [
   // i18n.js is loaded by index.html directly, so it has to be listed here
   // like every other file the page cannot open without.
   './i18n.js',
+  // intro.js, the opening's motion, is another classic script nothing imports.
+  './intro.js',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',

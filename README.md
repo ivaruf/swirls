@@ -52,6 +52,12 @@ under those. **Picking one is how swirls begins**, on that species. A returning
 visitor's last choice is already lit in the ring, so carrying on is a matter of
 pressing the one that is glowing.
 
+Before the ring, the **opening**: the mark's seven colours drift in as motes
+of light, wind into the ring and set it down on the ring's own centre while
+the piece behind fades up (`intro.js`, about three seconds). Any tap or key
+skips it, and with reduced motion asked for it does not run — the still
+splash is the whole opening then, as it always was.
+
 The ring is a real radiogroup of real buttons in clock order: Tab reaches it,
 the arrow keys walk the rim either way without committing, Home and End are
 noon and eleven o'clock, and Enter or Space picks. Twelve names will not fit

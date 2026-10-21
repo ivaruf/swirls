@@ -390,6 +390,23 @@
 
     #splash.gone { opacity: 0; }
 
+    /* The opening, given motion (intro.js): a canvas the script creates and
+       removes, playing on the splash's own ground at the splash's own spot.
+       Above everything, the corner plates at 80 included, because for its
+       three seconds it is the curtain, and a tap anywhere on it is the skip.
+       The CSS splash under it is untouched and is still the whole opening
+       wherever the script does not run (reduced motion among them). */
+    #intro {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 90;
+      touch-action: none;
+      cursor: pointer;
+    }
+
     /* THE MARK, DRAWN ONCE. It was #splash-mark and only ever appeared on the
        title screen; the menu's ring stands the twelve effects around the same
        drawing, so it is a class now and the two places that want it differ
@@ -845,6 +862,14 @@
 <script src="moved.js" defer></script>
 </head>
 <body>
+  <!--
+    The opening's motion: seven motes of the mark's light drift in, wind into
+    the ring and land it on the menu's mark. It plays over the splash below
+    rather than beside it, so there is still one opening. Async and first in
+    <body>: it neither waits for nor holds up the parse of effects.js, and its
+    key listener is in place long before main.js's. Any tap or key skips it.
+  -->
+  <script src="intro.js" async></script>
   <canvas id="c"></canvas>
   <div id="label"></div>
   <div id="hint" data-i18n="hint">trykk eller dra for å trylle &middot; hold inne for å lade opp &middot; &lsaquo; &rsaquo; bytt virvel</div>
