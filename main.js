@@ -743,10 +743,10 @@
    * its own with /arcade/ unreachable simply keeps the menu it has always
    * had.
    *
-   * Safe to read window.ArcadeExit here even though main.js is a classic
-   * script at the end of the body and exit.js is deferred in the head: boot
-   * waits two animation frames, and deferred scripts have all run well before
-   * the first one.
+   * exit.js is deferred and main.js is not, and boot's two animation frames
+   * can come before a slow ../arcade/ has answered — so the row is asked for
+   * again at DOMContentLoaded and load (below the boot call), by which time
+   * every deferred script has run.
    */
   function makeExitButton(className) {
     var exit = window.ArcadeExit;
@@ -833,6 +833,7 @@
   var quitExit = null;
 
   function addExitRow() {
+    if (quitExit) return; // already built: a retry must not draw a second door
     var row = makeExitButton('menu-exit');
     if (row) menuPanel.appendChild(row);
   }
@@ -1006,6 +1007,9 @@
   wireFader('vol-sfx', 'vol-sfx-out', KEY_VOL_SFX, function (level) {
     audio.setSfxVolume(level);
     liftMute();
+    // A level you cannot hear is one you cannot set: audition a tap's cast,
+    // which cast() already throttles on the AudioContext clock.
+    audio.cast(0.6, 0);
   });
 
   // ---- a language switch ----------------------------------------------------------
@@ -1116,6 +1120,12 @@
   // already bound and every one of them guards on `current`, so a tap landing
   // in this window is simply ignored rather than breaking anything.
   requestAnimationFrame(function () { requestAnimationFrame(boot); });
+
+  // The exit again, for an exit.js that arrived after boot (see makeExitButton).
+  // Only once the menu is built, so the row still lands at the foot of the panel.
+  function retryExit() { if (menuCells.length) addExitRow(); }
+  document.addEventListener('DOMContentLoaded', retryExit);
+  window.addEventListener('load', retryExit);
 
   // PWA: offline support + installability. Skipped on file:// where
   // service workers aren't available.

@@ -64,7 +64,7 @@
          "One button, and it looks and behaves the same in every game"). */
       'exit.arcade': 'Tilbake til arkaden',
       'exit.close': 'Lukk',
-      'exit.refused': 'Lukk denne fanen selv',
+      'exit.refused': 'Lukk vinduet selv',
       'error': 'fant ingen virvler',
       'effectN': function (n) { return 'virvel ' + n; },
       'fx.drift-tide': 'flo og fjære',
@@ -98,7 +98,7 @@
       'lang.group': 'language',
       'exit.arcade': 'Back to arcade',
       'exit.close': 'Close',
-      'exit.refused': 'Close this tab yourself',
+      'exit.refused': 'Close the window yourself',
       'error': 'no effects loaded',
       'effectN': function (n) { return 'effect ' + n; },
       'fx.drift-tide': 'drift tide',

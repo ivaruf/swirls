@@ -5,7 +5,7 @@
    served while the download finishes in the background to refresh the
    cache for next launch. Requests with nothing cached wait indefinitely,
    since there is nothing to fall back to. */
-var CACHE = 'swirls-v17'; // the opening gets motion: intro.js winds the mark's light into the ring and lands it on the menu
+var CACHE = 'swirls-v18'; // the EFFECTS fader sounds as it moves, the way out turns up even when exit.js is late, and a refused close says window
 var ANSWER_TIMEOUT = 3000;
 var DOWNLOAD_TIMEOUT = 15000;
 var ASSETS = [
