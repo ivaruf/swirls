@@ -220,6 +220,9 @@
 
   function frame(now) {
     rafId = requestAnimationFrame(frame);
+    // A tab opened in the background can run a frame before boot() picks an
+    // effect; logging that as an effect error would hide every real one.
+    if (!current) return;
     var dt = (now - lastTime) / 1000;
     lastTime = now;
     if (dt < 0) dt = 0;

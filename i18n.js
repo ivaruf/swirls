@@ -89,7 +89,7 @@
       'prev': 'previous effect',
       'next': 'next effect',
       'ring': 'effect',
-      'hint': 'tap or drag to cast · hold to charge · ‹ › change mode',
+      'hint': 'tap or drag to cast · hold to charge · ‹ › change effect',
       'sound': 'sound',
       'music': 'music',
       'effects': 'effects',
