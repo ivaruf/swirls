@@ -76,6 +76,9 @@
       position: fixed;
       left: 0;
       right: 0;
+      /* Clear of #cast-tools (two 44px arrows, a 6px gap, 8px from the edge)
+         on both sides, so it stays centred and never runs under ‹ ›. */
+      padding-inline: calc(108px + env(safe-area-inset-right, 0px));
       bottom: calc(22px + env(safe-area-inset-bottom, 0px));
       text-align: center;
       font-size: 10px;
